@@ -1,0 +1,2479 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIX GUYS WORK - USGS Astrogeology Mars Explorer</title>
+    <!-- Tải Tailwind CSS cho giao diện UI hiện đại -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tải Three.js để dựng đồ họa 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Font chữ phong cách khoa học viễn tưởng & kỹ thuật -->
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --mars-orange: #ff5722;
+            --mars-glow: rgba(255, 87, 34, 0.5);
+            --sci-cyan: #00e5ff;
+            --dark-bg: #07090e;
+            --panel-bg: rgba(13, 18, 28, 0.88);
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--dark-bg);
+            font-family: 'Inter', sans-serif;
+            color: #e2e8f0;
+        }
+
+        h1, h2, h3, .sci-font {
+            font-family: 'Chakra Petch', sans-serif;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            cursor: grab;
+        }
+
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+
+        /* Khung bản đồ phẳng 2D Equirectangular */
+        #flat-map-container {
+            position: fixed;
+            inset: 0;
+            z-index: 2;
+            background: radial-gradient(circle at center, #0c1220 0%, #05070c 100%);
+            display: none;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        #flat-map-container:active {
+            cursor: grabbing;
+        }
+
+        /* Hiệu ứng kính mờ (Glassmorphism) cho các bảng điều khiển */
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 229, 255, 0.22);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 0 15px rgba(0, 229, 255, 0.05);
+        }
+
+        /* Nhãn HTML nổi trên bề mặt 3D & 2D */
+        .mars-marker-label {
+            position: absolute;
+            z-index: 5;
+            pointer-events: auto;
+            cursor: pointer;
+            transform: translate(-50%, -100%);
+            transition: transform 0.2s ease, opacity 0.3s ease;
+        }
+
+        .mars-marker-label:hover {
+            transform: translate(-50%, -105%) scale(1.08);
+            z-index: 10;
+        }
+
+        .marker-pin {
+            width: 14px;
+            height: 14px;
+            background: var(--sci-cyan);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 12px var(--sci-cyan), 0 0 24px var(--sci-cyan);
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .marker-pin.landing-site {
+            background: var(--mars-orange);
+            box-shadow: 0 0 12px var(--mars-orange), 0 0 24px var(--mars-orange);
+        }
+
+        .marker-pin::after {
+            content: '';
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            right: -6px;
+            bottom: -6px;
+            border-radius: 50%;
+            border: 1px solid currentColor;
+            animation: pulseRing 2s infinite;
+        }
+
+        @keyframes pulseRing {
+            0% { transform: scale(0.7); opacity: 1; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        .marker-tag {
+            background: rgba(10, 15, 25, 0.92);
+            border: 1px solid rgba(0, 229, 255, 0.45);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+            color: #fff;
+            margin-bottom: 5px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.85);
+        }
+
+        .marker-tag.landing-tag {
+            border-color: rgba(255, 87, 34, 0.65);
+        }
+
+        /* Thanh cuộn tùy chỉnh */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 229, 255, 0.3);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 229, 255, 0.6);
+        }
+
+        /* Hiệu ứng quét radar trên màn hình loading */
+        .scanner-line {
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--sci-cyan), transparent);
+            animation: scan 2s linear infinite;
+        }
+
+        @keyframes scan {
+            0% { transform: translateY(-20px); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translateY(20px); opacity: 0; }
+        }
+
+        .selectable-text {
+            user-select: text;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Màn hình khởi động hệ thống -->
+    <div id="loading-screen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#05070b] transition-opacity duration-700">
+        <div class="w-80 text-center px-4">
+            <div class="text-cyan-400 sci-font text-2xl font-bold tracking-widest mb-2">SIX GUYS WORK</div>
+            <div id="loading-text" class="text-xs text-slate-400 tracking-wider mb-4">KẾT NỐI DỮ LIỆU MỞ NASA / USGS MARS TREK...</div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mb-3">
+                <div id="loading-bar" class="bg-gradient-to-r from-orange-500 to-cyan-400 h-full w-0 transition-all duration-300"></div>
+            </div>
+            <div class="scanner-line"></div>
+        </div>
+    </div>
+
+    <!-- Khung chứa đồ họa 3D Hình cầu (Chiếu sáng đồng đều không bóng tối) -->
+    <div id="canvas-container"></div>
+
+    <!-- Khung chứa Bản đồ phẳng 2D Equirectangular -->
+    <div id="flat-map-container">
+        <canvas id="flat-map-canvas" class="w-full h-full block"></canvas>
+    </div>
+
+    <!-- Lớp chứa các nhãn điểm đánh dấu 3D & 2D -->
+    <div id="markers-overlay" class="fixed inset-0 pointer-events-none z-10 overflow-hidden"></div>
+
+    <!-- Thanh tiêu đề, Chuyển đổi Chế độ Map, Ngôn ngữ & Nguồn dữ liệu phía trên -->
+    <header class="fixed top-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-2.5 pointer-events-none">
+        <!-- Logo & Tên dự án -->
+        <div class="glass-panel px-3.5 py-2 rounded-xl flex items-center gap-3 pointer-events-auto">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-600 to-red-800 flex items-center justify-center shadow-lg shadow-orange-600/30 border border-orange-400/30 shrink-0">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="9" stroke-width="2"/>
+                    <path stroke-linecap="round" stroke-width="1.5" d="M3.6 9h16.8M3.6 15h16.8M11.5 3a17 17 0 000 18M12.5 3a17 17 0 010 18"/>
+                </svg>
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <h1 class="text-sm sm:text-base font-bold tracking-wider text-white">SIX GUYS <span class="text-cyan-400">WORK</span></h1>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold">NASA / USGS</span>
+                </div>
+                <p id="ui-subtitle" class="text-[11px] text-slate-400 hidden lg:block">Hệ thống Bản đồ & Phân tích Địa chất Sao Hỏa (Chiếu sáng toàn phần)</p>
+            </div>
+        </div>
+
+        <!-- Cụm điều khiển trung tâm & bên phải -->
+        <div class="flex flex-wrap items-center gap-2 pointer-events-auto w-full sm:w-auto justify-end">
+            <!-- Thanh chọn nhanh địa điểm -->
+            <div class="glass-panel p-1.5 rounded-xl flex items-center gap-1.5 flex-1 sm:flex-initial">
+                <div class="relative flex-1 sm:w-52 md:w-60">
+                    <svg class="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <select id="location-selector" class="w-full bg-slate-900/90 text-xs text-slate-200 pl-8 pr-3 py-2 rounded-lg border border-slate-700 focus:outline-none focus:border-cyan-400 cursor-pointer">
+                    </select>
+                </div>
+                <button id="btn-reset-view" title="Đặt lại góc nhìn" class="p-2 rounded-lg bg-slate-800/90 hover:bg-cyan-500/20 text-cyan-400 border border-slate-700 hover:border-cyan-400 transition shrink-0">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Chuyển đổi 3D Globe / 2D Flat Map -->
+            <div class="glass-panel p-1 rounded-xl flex items-center gap-1">
+                <button id="mode-3d" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/25 text-cyan-300 border border-cyan-400 transition flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/><path stroke-width="1.5" d="M3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 000 18M12 3a14 14 0 010 18"/></svg>
+                    <span id="ui-mode-3d">3D Cầu</span>
+                </button>
+                <button id="mode-2d" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800/70 text-slate-400 border border-transparent hover:text-slate-200 transition flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+                    <span id="ui-mode-2d">2D Phẳng</span>
+                </button>
+            </div>
+
+            <!-- Nút mở bảng Nguồn Dữ Liệu & Hình Ảnh NASA/USGS -->
+            <button id="btn-open-credits" class="glass-panel px-3 py-2 rounded-xl text-xs font-semibold text-amber-300 hover:bg-amber-500/20 border border-amber-500/40 transition flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span id="ui-btn-credits">Nguồn Dữ Liệu & Ảnh</span>
+            </button>
+
+            <!-- Chuyển đổi ngôn ngữ VI / EN -->
+            <div class="glass-panel p-1 rounded-xl flex items-center gap-1">
+                <button id="lang-vi" class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-orange-500/25 text-orange-300 border border-orange-400 transition">VI</button>
+                <button id="lang-en" class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800/70 text-slate-400 border border-transparent hover:text-slate-200 transition">EN</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Bảng điều khiển lớp bản đồ chuẩn NASA Mars Trek / USGS Astrogeology ở góc dưới bên trái -->
+    <div class="fixed bottom-4 left-4 z-20 flex flex-col gap-2 max-w-[94vw] sm:max-w-[570px]">
+        <div class="glass-panel p-3 rounded-xl">
+            <div class="flex items-center justify-between mb-2 gap-2">
+                <div class="text-[11px] font-semibold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                    <span id="ui-layers-title">Lớp Bản Đồ Thật NASA Mars Trek / USGS</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span id="map-source-status" class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">NASA UNLIT MAP</span>
+                    <span id="ui-projection-badge" class="text-[10px] font-mono text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700/80">3D SPHERE</span>
+                </div>
+            </div>
+
+            <!-- 4 Lớp bản đồ USGS / NASA -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2">
+                <button id="layer-truecolor" data-layer="truecolor" class="layer-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-400 transition text-left">
+                    <div class="font-bold" id="ui-layer-truecolor">Màu Thực</div>
+                    <div class="text-[9px] opacity-75">Viking MDIM2.1 (Không bóng)</div>
+                </button>
+                <button id="layer-elevation" data-layer="elevation" class="layer-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition text-left">
+                    <div class="font-bold" id="ui-layer-elevation">Độ Cao</div>
+                    <div class="text-[9px] opacity-75">MOLA Colorized</div>
+                </button>
+                <button id="layer-geology" data-layer="geology" class="layer-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition text-left">
+                    <div class="font-bold" id="ui-layer-geology">Địa Chất</div>
+                    <div class="text-[9px] opacity-75">USGS SIM 3292</div>
+                </button>
+                <button id="layer-thermal" data-layer="thermal" class="layer-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition text-left">
+                    <div class="font-bold" id="ui-layer-thermal">Hồng Ngoại Ngày/Đêm</div>
+                    <div class="text-[9px] opacity-75">THEMIS IR Day/Night</div>
+                </button>
+            </div>
+
+            <!-- Công cụ phụ trợ: Lưới tọa độ & Tự xoay -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-700/60">
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="toggle-grid" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-slate-500" id="grid-indicator"></span>
+                        <span id="ui-btn-grid">Lưới Kinh/Vĩ Tuyến</span>
+                    </button>
+                    <button id="toggle-rotate" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-400 transition flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" id="rotate-indicator"></span>
+                        <span id="ui-btn-rotate">Tự Xoay Quỹ Đạo</span>
+                    </button>
+                </div>
+                <span id="ui-map-credit-inline" class="text-[10px] text-slate-400 font-mono">Unlit Full-Globe • NASA/USGS/ASU</span>
+            </div>
+
+            <!-- Chú giải thang đo độ cao MOLA -->
+            <div id="elevation-legend" class="hidden mt-2.5 pt-2 border-t border-slate-700/70">
+                <div class="flex justify-between text-[10px] text-slate-300 mb-1 font-mono">
+                    <span id="ui-elev-min">-8.2 km (Hellas)</span>
+                    <span>0 km (Datum)</span>
+                    <span id="ui-elev-max">+21.2 km (Olympus)</span>
+                </div>
+                <div class="h-2 w-full rounded-full" style="background: linear-gradient(90deg, #1e3a8a, #06b6d4, #22c55e, #eab308, #ef4444, #ffffff);"></div>
+            </div>
+
+            <!-- Chú giải Bản đồ Địa chất USGS SIM 3292 -->
+            <div id="geology-legend" class="hidden mt-2.5 pt-2 border-t border-slate-700/70">
+                <div id="ui-geo-legend-title" class="text-[10px] font-semibold text-slate-300 mb-1.5">Phân Loại Địa Tầng Chuẩn USGS SIM 3292 (Tanaka et al., 2014):</div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
+                    <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm shrink-0" style="background:#b45309"></span><span id="ui-geo-noachian">Cao nguyên Noachian</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm shrink-0" style="background:#15803d"></span><span id="ui-geo-hesperian">Đồng bằng Hesperian</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm shrink-0" style="background:#eab308"></span><span id="ui-geo-amazonian">Trầm tích Amazonian</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm shrink-0" style="background:#dc2626"></span><span id="ui-geo-volcanic">Núi lửa Tharsis/Elysium</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm shrink-0" style="background:#0284c7"></span><span id="ui-geo-basin">Bồn địa & Hồ cổ đại</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm shrink-0" style="background:#f1f5f9"></span><span id="ui-geo-polar">Chỏm băng Địa cực</span></div>
+                </div>
+            </div>
+
+            <!-- Chú giải Bản đồ Hồng ngoại Nhiệt THEMIS Ngày/Đêm -->
+            <div id="thermal-legend" class="hidden mt-2.5 pt-2 border-t border-slate-700/70">
+                <div class="flex justify-between text-[10px] text-slate-300 mb-1 gap-2">
+                    <span id="ui-therm-low">Tối: Bụi mịn nguội nhanh (Đêm) / Bóng dốc (Ngày)</span>
+                    <span id="ui-therm-high">Sáng: Đá gốc giữ nhiệt cao (Đêm) / Sườn nắng (Ngày)</span>
+                </div>
+                <div class="h-2 w-full rounded-full" style="background: linear-gradient(90deg, #0f172a, #475569, #cbd5e1, #ffffff);"></div>
+            </div>
+        </div>
+
+        <!-- Hiển thị tọa độ con trỏ thời gian thực -->
+        <div class="glass-panel px-3 py-1.5 rounded-lg flex items-center justify-between text-[11px] text-slate-300 gap-4">
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-orange-500"></span>
+                <span id="ui-legend-landing">Khu hạ cánh</span>
+                <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 ml-2"></span>
+                <span id="ui-legend-geology">Địa chất nổi bật</span>
+            </div>
+            <div id="coords-display" class="font-mono text-cyan-400">LAT: 0.00° | LON: 0.00°</div>
+        </div>
+    </div>
+
+    <!-- Bảng thông tin chi tiết trượt từ bên phải (Side Panel) -->
+    <aside id="detail-panel" class="fixed top-20 bottom-4 right-4 w-[92vw] sm:w-[430px] glass-panel rounded-2xl z-30 transform translate-x-[120%] transition-transform duration-500 ease-out flex flex-col overflow-hidden">
+        <!-- Header của Panel -->
+        <div class="p-4 border-b border-slate-700/80 flex items-start justify-between bg-slate-900/60">
+            <div>
+                <div class="flex items-center gap-2 mb-1">
+                    <span id="panel-badge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 border border-orange-500/40">KHU VỰC HẠ CÁNH</span>
+                    <span id="panel-coords" class="text-xs font-mono text-cyan-400">18.38°B, 77.58°Đ</span>
+                </div>
+                <h2 id="panel-title" class="text-xl font-bold text-white leading-tight">Hố Va Chạm Jezero</h2>
+                <p id="panel-subtitle" class="text-xs text-slate-400 mt-0.5">Sứ mệnh Mars 2020 - Tàu tự hành Perseverance</p>
+            </div>
+            <button id="close-panel" class="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Nội dung cuộn bên trong Panel -->
+        <div class="p-4 overflow-y-auto flex-1 space-y-4 text-sm">
+
+            <!-- KHUNG 1: ẢNH CHỤP THỰC TẾ TỪ TÀU VŨ TRỤ / VỆ TINH NASA (CÓ HỆ THỐNG DỰ PHÒNG ĐA TẦNG CHỐNG LỖI 100%) -->
+            <div class="rounded-xl overflow-hidden border border-cyan-500/35 bg-slate-950 relative group">
+                <div class="px-3 py-1.5 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        <span id="ui-panel-real-photo-title">Ảnh Thực Tế Từ Dữ Liệu Mở NASA</span>
+                    </span>
+                    <button id="btn-expand-photo" class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/35 transition flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                        <span id="ui-btn-zoom-photo">Phóng to</span>
+                    </button>
+                </div>
+                <div class="relative w-full h-44 bg-slate-900 overflow-hidden cursor-pointer" id="panel-photo-wrapper">
+                    <img id="panel-real-image" src="" alt="NASA Mars Imagery" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                    <div id="panel-photo-loader" class="hidden absolute inset-0 flex items-center justify-center bg-slate-900/75 text-xs text-cyan-400 font-mono">
+                        Đang đồng bộ ảnh vệ tinh NASA...
+                    </div>
+                </div>
+                <div class="p-2.5 bg-slate-900/95 border-t border-slate-800 space-y-1">
+                    <p id="panel-photo-caption" class="text-[11px] text-slate-200 leading-snug"></p>
+                    <div class="flex items-center justify-between text-[10px] text-amber-300/90 font-mono pt-0.5">
+                        <span id="panel-photo-credit">Credit: NASA/JPL-Caltech</span>
+                        <span id="panel-photo-id" class="text-slate-400">PIA24428</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KHUNG 2: SƠ ĐỒ HOẠT HỌA MẶT CẮT ĐỊA CHẤT SVG -->
+            <div class="rounded-xl overflow-hidden border border-slate-700/80 bg-slate-950 relative">
+                <div id="panel-visual" class="w-full h-36 flex items-center justify-center">
+                    <!-- SVG sơ đồ địa chất được sinh động theo từng địa điểm -->
+                </div>
+                <div class="px-3 py-1.5 bg-slate-900/90 text-[11px] text-slate-400 flex justify-between border-t border-slate-800">
+                    <span id="panel-visual-caption">Mô phỏng mặt cắt địa tầng & địa hình</span>
+                    <span class="text-cyan-400 font-mono"><span id="ui-panel-elev-label">Độ cao:</span> <strong id="panel-elevation">-2,570 m</strong></span>
+                </div>
+            </div>
+
+            <!-- Thông số kỹ thuật nhanh -->
+            <div class="grid grid-cols-2 gap-2.5">
+                <div class="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800">
+                    <div id="ui-panel-age-label" class="text-[10px] text-slate-400 uppercase">Niên đại địa chất</div>
+                    <div id="panel-age" class="text-xs font-semibold text-white mt-0.5">3.8 - 3.9 Tỷ năm (Noachian)</div>
+                </div>
+                <div class="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800">
+                    <div id="ui-panel-size-label" class="text-[10px] text-slate-400 uppercase">Đường kính / Quy mô</div>
+                    <div id="panel-size" class="text-xs font-semibold text-white mt-0.5">Rộng 45 km</div>
+                </div>
+            </div>
+
+            <!-- Đặc điểm địa chất -->
+            <div class="space-y-1.5">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                    <span id="ui-panel-geology-title">Đặc Điểm Địa Chất & Địa Hình</span>
+                </h3>
+                <p id="panel-geology" class="text-slate-300 text-xs leading-relaxed bg-slate-900/40 p-3 rounded-xl border border-slate-800/80"></p>
+            </div>
+
+            <!-- Thành phần khoáng vật -->
+            <div class="space-y-1.5">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    <span id="ui-panel-minerals-title">Thành Phần Khoáng Vật Chính</span>
+                </h3>
+                <div id="panel-minerals" class="flex flex-wrap gap-1.5"></div>
+            </div>
+
+            <!-- Lịch sử nước & Tiềm năng sự sống cổ đại -->
+            <div class="space-y-1.5">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/></svg>
+                    <span id="ui-panel-water-title">Lịch Sử Nước & Sự Sống Cổ Đại</span>
+                </h3>
+                <p id="panel-water" class="text-slate-300 text-xs leading-relaxed bg-emerald-950/20 p-3 rounded-xl border border-emerald-800/30"></p>
+            </div>
+
+            <!-- Trích dẫn nguồn dữ liệu khoa học của khu vực -->
+            <div class="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800 text-[10px] text-slate-400 flex items-center justify-between">
+                <span id="panel-data-source">Nguồn dữ liệu: NASA Mars Exploration / USGS</span>
+                <button id="btn-panel-credits-link" class="text-amber-400 hover:underline font-semibold">Chi tiết nguồn ↗</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MODAL PHÓNG TO ẢNH THỰC TẾ NASA (LIGHTBOX) -->
+    <div id="photo-lightbox-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-md p-4">
+        <div class="glass-panel max-w-4xl w-full rounded-2xl overflow-hidden border border-cyan-500/40 flex flex-col max-h-[90vh]">
+            <div class="p-3.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                    <h3 id="lightbox-title" class="text-base font-bold text-white">Hố Va Chạm Jezero</h3>
+                    <p id="lightbox-credit" class="text-xs text-amber-300 font-mono">Credit: NASA/JPL-Caltech/MSSS</p>
+                </div>
+                <button id="close-lightbox" class="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-400 border border-slate-700 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="flex-1 bg-black flex items-center justify-center overflow-hidden p-2">
+                <img id="lightbox-img" src="" alt="NASA Full Resolution" class="max-h-[65vh] w-auto object-contain rounded-lg" />
+            </div>
+            <div class="p-3.5 bg-slate-900/95 border-t border-slate-800 text-xs text-slate-300 leading-relaxed">
+                <p id="lightbox-caption"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL GHI RÕ NGUỒN DỮ LIỆU & HÌNH ẢNH (DATA & IMAGE ATTRIBUTION CREDITS) -->
+    <div id="credits-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 backdrop-blur-md p-4">
+        <div class="glass-panel max-w-3xl w-full rounded-2xl overflow-hidden border border-amber-500/40 flex flex-col max-h-[88vh]">
+            <!-- Header Modal -->
+            <div class="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    </div>
+                    <div>
+                        <h2 id="ui-credits-modal-title" class="text-lg font-bold text-white">Nguồn Dữ Liệu Mở & Hình Ảnh Khoa Học (NASA / USGS Open Data)</h2>
+                        <p id="ui-credits-modal-subtitle" class="text-xs text-slate-400">Trích dẫn chuẩn khoa học & bản quyền dữ liệu hành tinh công cộng (Public Domain)</p>
+                    </div>
+                </div>
+                <button id="close-credits-modal" class="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <!-- Nội dung trích dẫn cuộn -->
+            <div id="credits-modal-body" class="p-5 overflow-y-auto space-y-5 text-xs text-slate-300 selectable-text">
+                <!-- Nội dung được render tự động theo ngôn ngữ VI / EN -->
+            </div>
+
+            <!-- Footer Modal -->
+            <div class="p-3.5 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+                <span id="ui-credits-license">SIX GUYS WORK • NASA Open Data Policy / USGS Public Domain</span>
+                <button id="btn-close-credits-bottom" class="px-4 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400 hover:bg-cyan-500/30 font-semibold transition">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ============================================================================
+         * 1. DANH MỤC NGUỒN BẢN ĐỒ THẬT CHUẨN NASA MARS TREK / USGS ASTROGEOLOGY
+         *    - True Color: Bản đồ màu tự nhiên toàn cầu chiếu sáng đều, không có bóng tối ngày-đêm.
+         *    - Thermal: Bản đồ Hồng Ngoại Ngày/Đêm (THEMIS IR Day/Night Global Mosaic).
+         * ============================================================================
+         */
+        const NASA_GLOBAL_MAP_SOURCES = {
+            truecolor: [
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Solarsystemscope_texture_2k_mars.jpg/2048px-Solarsystemscope_texture_2k_mars.jpg',
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/0/02/OSIRIS_Mars_true_color.jpg/1280px-OSIRIS_Mars_true_color.jpg'
+            ],
+            elevation: [
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Mars_MGS_MOLA_ClrShade_merge_global_463m.jpg/2048px-Mars_MGS_MOLA_ClrShade_merge_global_463m.jpg',
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/MOLA_colorized.jpg/1280px-MOLA_colorized.jpg'
+            ],
+            geology: [
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/6/64/Geologic_map_of_Mars_-_Tanaka_et_al._2014_-_USGS_SIM_3292.jpg/2048px-Geologic_map_of_Mars_-_Tanaka_et_al._2014_-_USGS_SIM_3292.jpg',
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Mars_geologic_map.jpg/1280px-Mars_geologic_map.jpg'
+            ],
+            thermal: [
+                // THEMIS IR Day/Night Global Mosaic (NASA/JPL/ASU)
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Mars_THEMIS_Day_IR_Global_Mosaic.jpg/2048px-Mars_THEMIS_Day_IR_Global_Mosaic.jpg',
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Mars_MGS_MOLA_DEM_mosaic_global_463m.jpg/2048px-Mars_MGS_MOLA_DEM_mosaic_global_463m.jpg'
+            ]
+        };
+
+        /**
+         * ============================================================================
+         * 2. TỪ ĐIỂN SONG NGỮ ANH - VIỆT (I18N DICTIONARY)
+         * ============================================================================
+         */
+        let currentLang = 'vi';
+
+        const UI_TEXT = {
+            vi: {
+                loading: 'KẾT NỐI DỮ LIỆU MỞ NASA / USGS MARS TREK...',
+                subtitle: 'Hệ thống Bản đồ & Phân tích Địa chất Sao Hỏa (Chiếu sáng toàn phần)',
+                selectPlaceholder: '-- Chọn nhanh khu vực khảo sát --',
+                groupLanding: '🚀 Khu vực Tàu đổ bộ & Robot tự hành',
+                groupGeology: '🌋 Kỳ quan Địa chất Nổi bật',
+                mode3d: '3D Cầu',
+                mode2d: '2D Phẳng',
+                btnCredits: 'Nguồn Dữ Liệu & Ảnh',
+                layersTitle: 'Lớp Bản Đồ Thật NASA Mars Trek / USGS',
+                layerTrueColor: 'Màu Thực',
+                layerElevation: 'Độ Cao',
+                layerGeology: 'Địa Chất',
+                layerThermal: 'Hồng Ngoại Ngày/Đêm',
+                btnGrid: 'Lưới Kinh/Vĩ Tuyến',
+                btnRotate: 'Tự Xoay Quỹ Đạo',
+                elevMin: '-8.2 km (Hellas)',
+                elevMax: '+21.2 km (Olympus)',
+                geoLegendTitle: 'Phân Loại Địa Tầng Chuẩn USGS SIM 3292 (Tanaka et al., 2014):',
+                geoNoachian: 'Cao nguyên Noachian',
+                geoHesperian: 'Đồng bằng Hesperian',
+                geoAmazonian: 'Trầm tích Amazonian',
+                geoVolcanic: 'Núi lửa Tharsis/Elysium',
+                geoBasin: 'Bồn địa & Hồ cổ đại',
+                geoPolar: 'Chỏm băng Địa cực',
+                thermLow: 'Tối: Bụi mịn nguội nhanh (Đêm) / Bóng dốc (Ngày)',
+                thermHigh: 'Sáng: Đá gốc giữ nhiệt cao (Đêm) / Sườn nắng (Ngày)',
+                legendLanding: 'Khu hạ cánh',
+                legendGeology: 'Địa chất nổi bật',
+                realPhotoTitle: 'Ảnh Thực Tế Từ Dữ Liệu Mở NASA',
+                btnZoomPhoto: 'Phóng to',
+                visualCaption: 'Sơ đồ hoạt họa mặt cắt địa tầng & địa hình',
+                elevLabel: 'Độ cao:',
+                ageLabel: 'Niên đại địa chất',
+                sizeLabel: 'Đường kính / Quy mô',
+                geologyTitle: 'Đặc Điểm Địa Chất & Địa Hình',
+                mineralsTitle: 'Thành Phần Khoáng Vật Chính',
+                waterTitle: 'Lịch Sử Nước & Sự Sống Cổ Đại',
+                creditsModalTitle: 'Nguồn Dữ Liệu Mở & Hình Ảnh Khoa Học (NASA / USGS)',
+                creditsModalSubtitle: 'Trích dẫn minh bạch toàn bộ bản đồ hành tinh chiếu sáng đều, hồng ngoại ngày/đêm & ảnh vệ tinh',
+                creditsLicense: 'SIX GUYS WORK • Giấy phép: NASA Open Data Policy / USGS Public Domain',
+                closeBtn: 'Đóng',
+                svgDeltaWater: 'Mực nước hồ cổ (~3.7 tỷ năm)',
+                svgDeltaBase: 'Đá nền Bazan núi lửa',
+                svgDeltaSediment: 'Trầm tích châu thổ (Sét & Cacbonat)',
+                svgVolcanoHeight: 'Đỉnh +21.2 km',
+                svgVolcanoCaldera: 'Hõm chảo Caldera',
+                svgCanyonDepth: 'Độ sâu tới 7-8 km',
+                svgCanyonIce: 'Lớp đất giàu băng ngầm',
+                svgPlainsTop: 'Lớp bụi Regolith & Bazan bề mặt',
+                svgPlainsMid: 'Tầng chứa băng nước / Khe nứt ngậm nước',
+                svgPlainsBot: 'Lớp vỏ đá gốc (Crust)'
+            },
+            en: {
+                loading: 'CONNECTING TO NASA / USGS MARS TREK OPEN DATA...',
+                subtitle: 'Mars Geological & Landing Site Explorer (Unlit Full-Illumination)',
+                selectPlaceholder: '-- Quick Select Survey Region --',
+                groupLanding: '🚀 Landers & Rovers Landing Sites',
+                groupGeology: '🌋 Major Geological Landmarks',
+                mode3d: '3D Globe',
+                mode2d: '2D Flat Map',
+                btnCredits: 'Data & Image Credits',
+                layersTitle: 'NASA Mars Trek / USGS Real Map Layers',
+                layerTrueColor: 'True Color',
+                layerElevation: 'Elevation',
+                layerGeology: 'Geologic',
+                layerThermal: 'Thermal IR Day/Night',
+                btnGrid: 'Lat/Lon Graticule',
+                btnRotate: 'Orbital Auto-Rotate',
+                elevMin: '-8.2 km (Hellas)',
+                elevMax: '+21.2 km (Olympus)',
+                geoLegendTitle: 'USGS SIM 3292 Geologic Units (Tanaka et al., 2014):',
+                geoNoachian: 'Noachian Highlands',
+                geoHesperian: 'Hesperian Plains',
+                geoAmazonian: 'Amazonian Deposits',
+                geoVolcanic: 'Tharsis/Elysium Volcanics',
+                geoBasin: 'Impact Basins & Paleolakes',
+                geoPolar: 'Polar Ice Caps',
+                thermLow: 'Dark: Fine Dust Cooling (Night) / Slopes (Day)',
+                thermHigh: 'Bright: High Thermal Inertia Bedrock (Night) / Sunlit (Day)',
+                legendLanding: 'Landing Site',
+                legendGeology: 'Geologic Feature',
+                realPhotoTitle: 'Real Imagery from NASA Open Data',
+                btnZoomPhoto: 'Enlarge',
+                visualCaption: 'Animated Stratigraphic & Topographic Cross-Section',
+                elevLabel: 'Elevation:',
+                ageLabel: 'Geologic Epoch / Age',
+                sizeLabel: 'Diameter / Scale',
+                geologyTitle: 'Geology & Geomorphology',
+                mineralsTitle: 'Primary Mineralogy',
+                waterTitle: 'Paleohydrology & Astrobiology',
+                creditsModalTitle: 'Open Data & Scientific Imagery Citations (NASA / USGS)',
+                creditsModalSubtitle: 'Transparent attribution for unlit global planetary maps, Day/Night Thermal IR & spacecraft photos',
+                creditsLicense: 'SIX GUYS WORK • License: NASA Open Data Policy / USGS Public Domain',
+                closeBtn: 'Close',
+                svgDeltaWater: 'Paleolake Water Level (~3.7 Ga)',
+                svgDeltaBase: 'Volcanic Basalt Bedrock',
+                svgDeltaSediment: 'Deltaic Sediments (Clays & Carbonates)',
+                svgVolcanoHeight: 'Summit +21.2 km',
+                svgVolcanoCaldera: 'Summit Caldera',
+                svgCanyonDepth: 'Depth up to 7-8 km',
+                svgCanyonIce: 'Subsurface Ice-Rich Regolith',
+                svgPlainsTop: 'Surface Regolith Dust & Basalt',
+                svgPlainsMid: 'Subsurface Water Ice / Fractured Aquifer',
+                svgPlainsBot: 'Deep Bedrock Crust'
+            }
+        };
+
+        /**
+         * ============================================================================
+         * 3. CƠ SỞ DỮ LIỆU SONG NGỮ ĐỊA CHẤT & ĐA NGUỒN ẢNH CHO 8 KHU VỰC
+         *    Mỗi địa điểm có danh sách URL thực tế từ NASA/Wikimedia và mã dựng Canvas
+         *    độ phân giải cao nếu trình duyệt/mạng chặn ảnh ngoài.
+         * ============================================================================
+         */
+        const MARS_LOCATIONS = [
+            {
+                id: 'jezero',
+                type: 'landing',
+                lat: 18.38,
+                lon: 77.58,
+                elevation: '-2,570 m',
+                visualType: 'delta',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA24428/PIA24428~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/PIA24428-MarsPerseveranceRover-JezeroCrater-20210223.jpg/800px-PIA24428-MarsPerseveranceRover-JezeroCrater-20210223.jpg'
+                    ],
+                    id: 'NASA PIA24428 / HiRISE',
+                    credit: 'NASA/JPL-Caltech/Univ. of Arizona (HiRISE)',
+                    captionVi: 'Ảnh vệ tinh MRO/HiRISE chụp vùng châu thổ sông cổ đại hình quạt tại rìa Tây hố va chạm Jezero – nơi tàu tự hành Perseverance hạ cánh.',
+                    captionEn: 'MRO/HiRISE orbital image of the ancient fan-shaped river delta on the western rim of Jezero Crater, landing site of NASA’s Perseverance rover.'
+                },
+                vi: {
+                    name: 'Hố Va Chạm Jezero',
+                    shortName: 'Jezero (Perseverance)',
+                    badge: 'KHU HẠ CÁNH • MARS 2020',
+                    mission: 'Tàu tự hành Perseverance & Trực thăng Ingenuity (NASA)',
+                    age: '3.8 - 3.9 Tỷ năm (Kỷ Noachian)',
+                    size: 'Đường kính 45 km',
+                    geology: 'Jezero từng là một hồ nước cổ đại khổng lồ với hệ thống châu thổ sông (delta) hình quạt cực kỳ rõ nét ở rìa phía Tây. Các lớp trầm tích xếp tầng tại đây lưu giữ dấu vết của dòng chảy phù sa đổ vào hồ qua hàng triệu năm, xen kẽ với đá bazan núi lửa ở đáy hố.',
+                    minerals: ['Khoáng sét Smectite', 'Cacbonat (Magnesite)', 'Olivine', 'Pyroxene', 'Silica ngậm nước'],
+                    water: 'Bằng chứng chắc chắn về một hồ nước sâu từng tồn tại cách đây ~3.7 tỷ năm. Các khoáng chất cacbonat và sét dọc bờ hồ cổ là môi trường lý tưởng để bảo tồn các dấu ấn sinh học (biosignatures) của vi sinh vật cổ đại.',
+                    sourceNote: 'NASA Mars 2020 Science Team / MRO HiRISE / USGS'
+                },
+                en: {
+                    name: 'Jezero Impact Crater',
+                    shortName: 'Jezero (Perseverance)',
+                    badge: 'LANDING SITE • MARS 2020',
+                    mission: 'Perseverance Rover & Ingenuity Helicopter (NASA)',
+                    age: '3.8 - 3.9 Billion Years (Noachian)',
+                    size: '45 km Diameter',
+                    geology: 'Jezero once hosted a massive ancient lake fed by a remarkably preserved fan-shaped river delta on its western rim. Layered sedimentary deposits record millions of years of fluvial transport, overlying volcanic basaltic floor units.',
+                    minerals: ['Smectite Clays', 'Carbonates (Magnesite)', 'Olivine', 'Pyroxene', 'Hydrated Silica'],
+                    water: 'Definitive evidence of a deep paleolake ~3.7 billion years ago. Shoreline carbonates and phyllosilicate clays provide ideal conditions for preserving potential microbial biosignatures.',
+                    sourceNote: 'NASA Mars 2020 Science Team / MRO HiRISE / USGS'
+                }
+            },
+            {
+                id: 'gale',
+                type: 'landing',
+                lat: -5.4,
+                lon: 137.8,
+                elevation: '-4,500 m',
+                visualType: 'mountain_crater',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA17944/PIA17944~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/d/dc/PIA17944-MarsCuriosityRover-AfterCrossingDingoGapSandDune-20140209.jpg/800px-PIA17944-MarsCuriosityRover-AfterCrossingDingoGapSandDune-20140209.jpg'
+                    ],
+                    id: 'NASA PIA17944 / Mastcam',
+                    credit: 'NASA/JPL-Caltech/MSSS (Curiosity Mastcam)',
+                    captionVi: 'Ảnh chụp bề mặt thực tế do camera Mastcam trên tàu tự hành Curiosity ghi lại tại cồn cát Dingo Gap dưới chân Núi Sharp trong hố Gale.',
+                    captionEn: 'Real surface mosaic captured by Curiosity’s Mastcam at Dingo Gap sand dune near Mount Sharp inside Gale Crater.'
+                },
+                vi: {
+                    name: 'Hố Gale & Núi Sharp',
+                    shortName: 'Hố Gale (Curiosity)',
+                    badge: 'KHU HẠ CÁNH • MSL 2012',
+                    mission: 'Robot tự hành Curiosity (NASA)',
+                    age: '3.5 - 3.8 Tỷ năm',
+                    size: 'Rộng 154 km • Núi cao 5.5 km',
+                    geology: 'Đặc trưng bởi ngọn núi trầm tích khổng lồ Aeolis Mons (Núi Sharp) cao 5.5 km mọc lên ngay trung tâm hố va chạm. Các tầng đá dưới chân núi chứa đá bùn (mudstone) mịn cho thấy quá trình lắng đọng lâu dài dưới đáy hồ nước ngọt.',
+                    minerals: ['Khoáng sét Phyllosilicate', 'Sunfat (Thạch cao)', 'Hematite', 'Hợp chất hữu cơ chứa Carbon'],
+                    water: 'Curiosity đã phát hiện các lòng suối cổ với sỏi cuội tròn nhẵn, chứng minh nước lỏng từng chảy liên tục trên bề mặt trong hàng triệu năm với độ pH trung tính phù hợp cho sự sống.',
+                    sourceNote: 'NASA Mars Science Laboratory (MSL) / MSSS / USGS'
+                },
+                en: {
+                    name: 'Gale Crater & Mount Sharp',
+                    shortName: 'Gale Crater (Curiosity)',
+                    badge: 'LANDING SITE • MSL 2012',
+                    mission: 'Curiosity Rover (NASA Mars Science Laboratory)',
+                    age: '3.5 - 3.8 Billion Years',
+                    size: '154 km Wide • 5.5 km Central Peak',
+                    geology: 'Dominated by Aeolis Mons (Mount Sharp), a 5.5 km tall stratified sedimentary mountain rising from the crater center. Basal mudstones indicate prolonged lacustrine deposition in a freshwater lake environment.',
+                    minerals: ['Phyllosilicate Clays', 'Sulfates (Gypsum)', 'Hematite', 'Organic Carbon Compounds'],
+                    water: 'Curiosity discovered ancient streambeds with rounded conglomerates, proving sustained liquid water flow for millions of years with neutral pH habitable conditions.',
+                    sourceNote: 'NASA Mars Science Laboratory (MSL) / MSSS / USGS'
+                }
+            },
+            {
+                id: 'olympus',
+                type: 'geology',
+                lat: 18.65,
+                lon: 226.2,
+                elevation: '+21,229 m',
+                visualType: 'volcano',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA02982/PIA02982~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Olympus_Mons_alt.jpg/800px-Olympus_Mons_alt.jpg'
+                    ],
+                    id: 'NASA PIA02982 / Viking',
+                    credit: 'NASA/JPL/Viking Orbiter & MGS',
+                    captionVi: 'Ảnh chụp từ quỹ đạo của núi lửa hình khiên lớn nhất hệ mặt trời Olympus Mons (cao 21.2 km, rộng 624 km) với hõm chảo Caldera trung tâm.',
+                    captionEn: 'Orbital mosaic of Olympus Mons shield volcano (21.2 km high, 624 km wide) showing its multi-ring summit caldera complex.'
+                },
+                vi: {
+                    name: 'Núi Lửa Olympus Mons',
+                    shortName: 'Olympus Mons',
+                    badge: 'ĐỊA CHẤT • NÚI LỬA KHIÊN',
+                    mission: 'Khảo sát quỹ đạo MRO, Mars Express & Viking',
+                    age: 'Khoảng 100 - 200 Triệu năm (Amazonian)',
+                    size: 'Cao 21.2 km • Rộng 624 km',
+                    geology: 'Ngọn núi lửa lớn nhất và cao nhất được biết đến trong Hệ Mặt Trời (cao gấp gần 3 lần đỉnh Everest). Đây là dạng núi lửa hình khiên (shield volcano) được bồi đắp bởi dung nham bazan chảy tràn qua hàng trăm triệu năm do Sao Hỏa không có kiến tạo mảng dịch chuyển.',
+                    minerals: ['Đá Bazan giàu sắt', 'Plagioclase Feldspar', 'Pyroxene', 'Oxit sắt bề mặt'],
+                    water: 'Không phải môi trường hồ nước, nhưng nhiệt lượng từ hoạt động phun trào núi lửa trong quá khứ có thể đã làm tan chảy các túi băng ngầm dưới lòng đất, tạo ra các hệ thống thủy nhiệt tạm thời.',
+                    sourceNote: 'NASA Viking Orbiter / MGS MOLA / USGS Astrogeology'
+                },
+                en: {
+                    name: 'Olympus Mons Shield Volcano',
+                    shortName: 'Olympus Mons',
+                    badge: 'GEOLOGY • SHIELD VOLCANO',
+                    mission: 'Orbital Surveys: MRO, Mars Express & Viking',
+                    age: '~100 - 200 Million Years (Amazonian)',
+                    size: '21.2 km High • 624 km Wide',
+                    geology: 'The largest and tallest volcano in the Solar System (nearly 3x the height of Mount Everest). Built by low-viscosity basaltic lava flows over hundreds of millions of years due to the lack of mobile plate tectonics on Mars.',
+                    minerals: ['Iron-rich Basalt', 'Plagioclase Feldspar', 'Pyroxene', 'Ferric Oxide Dust'],
+                    water: 'While primarily volcanic, magmatic heat likely melted subsurface ground-ice reservoirs, generating transient hydrothermal systems along its flanks.',
+                    sourceNote: 'NASA Viking Orbiter / MGS MOLA / USGS Astrogeology'
+                }
+            },
+            {
+                id: 'valles',
+                type: 'geology',
+                lat: -13.9,
+                lon: 300.8,
+                elevation: '-7,000 m',
+                visualType: 'canyon',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA00422/PIA00422~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Valles_Marineris_high_resolution_mosaic.jpg/800px-Valles_Marineris_high_resolution_mosaic.jpg'
+                    ],
+                    id: 'NASA PIA00422 / Viking',
+                    credit: 'NASA/JPL-Caltech/USGS (Viking Orbiter Mosaic)',
+                    captionVi: 'Ảnh ghép độ phân giải cao từ tàu quỹ đạo Viking của hệ thống hẻm núi đứt gãy khổng lồ Valles Marineris dài 4,000 km.',
+                    captionEn: 'High-resolution Viking Orbiter mosaic of Valles Marineris, the 4,000 km long tectonic rift canyon system across central Mars.'
+                },
+                vi: {
+                    name: 'Hẻm Núi Valles Marineris',
+                    shortName: 'Valles Marineris',
+                    badge: 'ĐỊA CHẤT • HỆ THỐNG ĐỨT GÃY',
+                    mission: 'Khảo sát quỹ đạo Mariner 9, MRO & TGO',
+                    age: '3.5 Tỷ năm (Kỷ Hesperian)',
+                    size: 'Dài 4,000 km • Sâu tới 7 km',
+                    geology: 'Hệ thống hẻm núi khổng lồ trải dài gần 1/4 chu vi Sao Hỏa (lớn gấp 10 lần Grand Canyon ở Trái Đất). Hình thành chủ yếu do sự nứt gãy kiến tạo khổng lồ của lớp vỏ hành tinh khi vùng phình núi lửa Tharsis dâng lên, sau đó bị xói mòn bởi lở đất và lũ quét.',
+                    minerals: ['Sunfat đa ngậm nước', 'Opaline Silica', 'Oxit sắt tinh thể', 'Đá trầm tích phân lớp'],
+                    water: 'Vệ tinh ExoMars Trace Gas Orbiter phát hiện lượng hydro dồi dào (tương đương 40% lớp đất mặt là băng nước) ẩn ngay dưới bề mặt tại khu vực trung tâm Candor Chasma.',
+                    sourceNote: 'NASA Viking Orbiter / MRO CRISM / ExoMars TGO'
+                },
+                en: {
+                    name: 'Valles Marineris Canyon System',
+                    shortName: 'Valles Marineris',
+                    badge: 'GEOLOGY • TECTONIC RIFT',
+                    mission: 'Orbital Surveys: Mariner 9, MRO & ExoMars TGO',
+                    age: '3.5 Billion Years (Hesperian)',
+                    size: '4,000 km Long • Up to 7 km Deep',
+                    geology: 'A colossal tectonic rift system stretching nearly a quarter of Mars’ circumference (10x longer than Earth’s Grand Canyon). Formed by crustal fracturing during the uplift of the Tharsis bulge, later widened by landslides and outflow channels.',
+                    minerals: ['Polyhydrated Sulfates', 'Opaline Silica', 'Crystalline Ferric Oxides', 'Layered Sediments'],
+                    water: 'ExoMars Trace Gas Orbiter detected high hydrogen concentrations (up to 40% water-equivalent ice) hidden just beneath the surface in central Candor Chasma.',
+                    sourceNote: 'NASA Viking Orbiter / MRO CRISM / ExoMars TGO'
+                }
+            },
+            {
+                id: 'elysium',
+                type: 'landing',
+                lat: 4.5,
+                lon: 135.62,
+                elevation: '-2,655 m',
+                visualType: 'plains',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA22876/PIA22876~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/PIA22876-MarsInSightLander-FirstColorImage-20181206.jpg/800px-PIA22876-MarsInSightLander-FirstColorImage-20181206.jpg'
+                    ],
+                    id: 'NASA PIA22876 / IDC',
+                    credit: 'NASA/JPL-Caltech (InSight Lander IDC)',
+                    captionVi: 'Ảnh chụp màu đầu tiên từ camera triển khai thiết bị (IDC) trên trạm địa vật lý NASA InSight tại đồng bằng Elysium Planitia.',
+                    captionEn: 'First surface color image captured by NASA InSight’s Instrument Deployment Camera on the smooth plains of Elysium Planitia.'
+                },
+                vi: {
+                    name: 'Đồng Bằng Elysium Planitia',
+                    shortName: 'Elysium (InSight)',
+                    badge: 'KHU HẠ CÁNH • ĐỊA VẬT LÝ',
+                    mission: 'Trạm địa chấn InSight (NASA - 2018)',
+                    age: '2.5 - 3.0 Tỷ năm',
+                    size: 'Vùng đồng bằng núi lửa rộng lớn',
+                    geology: 'Đồng bằng bằng phẳng được bao phủ bởi các dòng dung nham bazan cổ đại và lớp bụi mịn regolith. InSight đã đo được hơn 1,300 trận "động đất Sao Hỏa" (marsquakes), giúp các nhà khoa học lập bản đồ cấu trúc lớp vỏ, lớp phủ (mantle) và lõi lỏng của Sao Hỏa.',
+                    minerals: ['Bazan Olivine', 'Regolith giàu oxit sắt', 'Plagioclase'],
+                    water: 'Dữ liệu sóng địa chấn cho thấy lớp vỏ sâu từ 11.5 đến 20 km bên dưới khu vực này có thể chứa các khe nứt đá bão hòa nước lỏng.',
+                    sourceNote: 'NASA InSight Mission / JPL-Caltech / ETH Zurich'
+                },
+                en: {
+                    name: 'Elysium Planitia',
+                    shortName: 'Elysium (InSight)',
+                    badge: 'LANDING SITE • GEOPHYSICS',
+                    mission: 'InSight Geophysical Lander (NASA - 2018)',
+                    age: '2.5 - 3.0 Billion Years',
+                    size: 'Broad Volcanic Plain',
+                    geology: 'Smooth volcanic plains covered by ancient basaltic lava flows and impact-gardened regolith. InSight detected over 1,300 marsquakes, revealing the thickness of the Martian crust, mantle structure, and liquid iron-alloy core.',
+                    minerals: ['Olivine Basalt', 'Iron-Oxide Regolith', 'Plagioclase'],
+                    water: 'Seismic wave inversions suggest fractured igneous rocks between 11.5 and 20 km depth beneath InSight may be saturated with liquid water.',
+                    sourceNote: 'NASA InSight Mission / JPL-Caltech / ETH Zurich'
+                }
+            },
+            {
+                id: 'utopia',
+                type: 'landing',
+                lat: 25.06,
+                lon: 109.92,
+                elevation: '-4,100 m',
+                visualType: 'ice_plains',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA00568/PIA00568~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Viking_2_lander_site_on_Mars.jpg/800px-Viking_2_lander_site_on_Mars.jpg'
+                    ],
+                    id: 'NASA PIA00568 / Viking 2',
+                    credit: 'NASA/JPL (Viking 2 Lander / Utopia Planitia)',
+                    captionVi: 'Ảnh chụp toàn cảnh bề mặt đồng bằng đá bazan và băng giá Utopia Planitia do tàu đổ bộ Viking 2 ghi lại.',
+                    captionEn: 'Surface panorama of the boulder-strewn plains of Utopia Planitia captured by NASA’s Viking 2 Lander.'
+                },
+                vi: {
+                    name: 'Đồng Bằng Utopia Planitia',
+                    shortName: 'Utopia (Viking 2 / Zhurong)',
+                    badge: 'KHU HẠ CÁNH • VIKING 2 & TIANWEN-1',
+                    mission: 'Tàu Viking 2 (NASA) & Robot Zhurong (CNSA)',
+                    age: '3.2 - 3.6 Tỷ năm',
+                    size: 'Bồn địa rộng 3,300 km',
+                    geology: 'Bồn địa va chạm lớn nhất được xác nhận trên Sao Hỏa nằm ở bán cầu Bắc. Bề mặt có nhiều gờ cát, nón bùn núi lửa (mud volcanoes) và các vết nứt đa giác đặc trưng của vùng đất đóng băng vĩnh cửu.',
+                    minerals: ['Khoáng chất ngậm nước', 'Silica vô định hình', 'Băng nước ngầm'],
+                    water: 'Radar xuyên đất SHARAD trên vệ tinh NASA MRO và robot Zhurong phát hiện một lớp băng nước ngầm khổng lồ nằm cách bề mặt chỉ vài mét, có thể từng là một đại dương cổ ở bán cầu Bắc.',
+                    sourceNote: 'NASA Viking 2 / MRO SHARAD / CNSA Tianwen-1'
+                },
+                en: {
+                    name: 'Utopia Planitia Basin',
+                    shortName: 'Utopia (Viking 2 / Zhurong)',
+                    badge: 'LANDING SITE • VIKING 2 & TIANWEN-1',
+                    mission: 'Viking 2 Lander (NASA) & Zhurong Rover (CNSA)',
+                    age: '3.2 - 3.6 Billion Years',
+                    size: '3,300 km Impact Basin',
+                    geology: 'The largest recognized impact basin on Mars, located in the northern lowlands. Features periglacial polygonal terrain, pitted cones (mud volcanoes), and wind-sculpted transverse aeolian ridges.',
+                    minerals: ['Hydrated Minerals', 'Amorphous Silica', 'Subsurface Water Ice'],
+                    water: 'Ground-penetrating radar on NASA’s MRO SHARAD and Zhurong detected massive subsurface water-ice deposits just meters below the regolith, supporting an ancient northern ocean hypothesis.',
+                    sourceNote: 'NASA Viking 2 / MRO SHARAD / CNSA Tianwen-1'
+                }
+            },
+            {
+                id: 'gusev',
+                type: 'landing',
+                lat: -14.57,
+                lon: 175.47,
+                elevation: '-1,900 m',
+                visualType: 'delta',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA03271/PIA03271~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/PIA03271_-_Spirit_view_of_Columbia_Hills.jpg/800px-PIA03271_-_Spirit_view_of_Columbia_Hills.jpg'
+                    ],
+                    id: 'NASA PIA03271 / Pancam',
+                    credit: 'NASA/JPL-Caltech/Cornell (Spirit Pancam)',
+                    captionVi: 'Ảnh toàn cảnh dãy đồi Columbia bên trong hố va chạm Gusev được ghi lại bởi camera Pancam trên robot tự hành Spirit.',
+                    captionEn: 'Panoramic view of the Columbia Hills inside Gusev Crater captured by NASA Spirit’s Pancam.'
+                },
+                vi: {
+                    name: 'Hố Va Chạm Gusev',
+                    shortName: 'Hố Gusev (Spirit)',
+                    badge: 'KHU HẠ CÁNH • MER-A 2004',
+                    mission: 'Robot tự hành Spirit (NASA)',
+                    age: '3.7 - 4.0 Tỷ năm',
+                    size: 'Đường kính 166 km',
+                    geology: 'Một hố va chạm cổ đại có thung lũng sông Ma’adim Vallis chảy thẳng vào từ phía Nam. Dù đáy hố bị phủ bởi dung nham bazan, khu vực đồi Columbia bên trong lại chứa nhiều đá biến đổi do nước và hơi nóng.',
+                    minerals: ['Silica tinh khiết (90%)', 'Goethite (Khoáng chứa nước)', 'Cacbonat giàu Magie-Sắt'],
+                    water: 'Spirit vô tình làm kẹt một bánh xe và cày xới lớp đất giàu Silica tinh khiết—bằng chứng rõ ràng của các suối nước nóng hoặc lỗ phun khí thủy nhiệt cổ đại, môi trường cực kỳ thuận lợi cho vi khuẩn ưa nhiệt.',
+                    sourceNote: 'NASA Mars Exploration Rover (MER-A Spirit) / Cornell'
+                },
+                en: {
+                    name: 'Gusev Impact Crater',
+                    shortName: 'Gusev Crater (Spirit)',
+                    badge: 'LANDING SITE • MER-A 2004',
+                    mission: 'Spirit Mars Exploration Rover (NASA)',
+                    age: '3.7 - 4.0 Billion Years',
+                    size: '166 km Diameter',
+                    geology: 'An ancient crater breached on its southern rim by Ma’adim Vallis, a massive outflow valley. While basaltic plains cover the floor, the interior Columbia Hills preserve heavily hydrothermally altered rocks.',
+                    minerals: ['Opaline Silica (90% Pure)', 'Goethite (Hydrous Iron Oxide)', 'Mg-Fe Carbonates'],
+                    water: 'Spirit’s stuck wheel excavated nearly pure opaline silica deposits at Home Plate—clear evidence of ancient hot springs or fumaroles ideal for thermophilic microbial life.',
+                    sourceNote: 'NASA Mars Exploration Rover (MER-A Spirit) / Cornell'
+                }
+            },
+            {
+                id: 'hellas',
+                type: 'geology',
+                lat: -42.4,
+                lon: 70.5,
+                elevation: '-8,200 m',
+                visualType: 'canyon',
+                realPhoto: {
+                    urls: [
+                        'https://images-assets.nasa.gov/image/PIA02819/PIA02819~medium.jpg',
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Hellas_basin_topo.jpg/800px-Hellas_basin_topo.jpg'
+                    ],
+                    id: 'NASA PIA02819 / MOLA',
+                    credit: 'NASA/GSFC/MOLA Science Team',
+                    captionVi: 'Dữ liệu đo cao địa hình màu quang phổ MOLA của bồn địa va chạm Hellas Planitia – hố va chạm sâu nhất trên Sao Hỏa (-8.2 km).',
+                    captionEn: 'MOLA spectral topographic relief map of Hellas Planitia – the deepest impact basin on Mars (-8.2 km).'
+                },
+                vi: {
+                    name: 'Bồn Địa Hellas Planitia',
+                    shortName: 'Hellas Planitia',
+                    badge: 'ĐỊA CHẤT • BỒN ĐỊA SÂU NHẤT',
+                    mission: 'Quan sát quỹ đạo MOLA & Mars Reconnaissance Orbiter',
+                    age: '3.9 - 4.1 Tỷ năm (Kỷ Noachian sớm)',
+                    size: 'Rộng 2,300 km • Sâu hơn 8 km',
+                    geology: 'Điểm thấp nhất trên toàn bộ bề mặt Sao Hỏa, được tạo ra bởi một thiên thạch khổng lồ đâm sầm vào hành tinh thời kỳ sơ khai. Áp suất khí quyển tại đáy hố cao hơn 89% so với mức trung bình của Sao Hỏa.',
+                    minerals: ['Sông băng đá phủ bụi', 'Khoáng sét cổ đại', 'Trầm tích hồ băng'],
+                    water: 'Nhờ áp suất cao và độ sâu lớn, nước lỏng từng có thể tồn tại ổn định trên bề mặt đáy Hellas lâu hơn bất kỳ nơi nào khác trên Sao Hỏa. Hiện nay nơi đây vẫn chứa các sông băng ngầm khổng lồ.',
+                    sourceNote: 'NASA GSFC MOLA Science Team / MRO SHARAD'
+                },
+                en: {
+                    name: 'Hellas Planitia Impact Basin',
+                    shortName: 'Hellas Planitia',
+                    badge: 'GEOLOGY • DEEPEST BASIN',
+                    mission: 'Orbital Surveys: MOLA & MRO',
+                    age: '3.9 - 4.1 Billion Years (Early Noachian)',
+                    size: '2,300 km Wide • >8 km Deep',
+                    geology: 'The lowest elevation on Mars, excavated by a colossal asteroid impact during the Early Noachian. Atmospheric pressure at the basin floor is 89% higher than the Martian datum.',
+                    minerals: ['Debris-Covered Glaciers', 'Ancient Phyllosilicates', 'Glaciolacustrine Sediments'],
+                    water: 'Due to higher atmospheric pressure and depth, liquid water remained stable on the floor of Hellas longer than anywhere else on Mars. Massive subsurface glaciers still persist today.',
+                    sourceNote: 'NASA GSFC MOLA Science Team / MRO SHARAD'
+                }
+            }
+        ];
+
+        /**
+         * ============================================================================
+         * 4. TRÌNH DỰNG ẢNH VỆ TINH / BỀ MẶT DỰ PHÒNG ĐỘ PHÂN GIẢI CAO (HTML5 CANVAS)
+         *    Đảm bảo 100% ảnh trong Side Panel & Lightbox luôn sắc nét, sống động
+         *    ngay cả khi mạng chặn hotlink từ NASA/Wikimedia.
+         * ============================================================================
+         */
+        function generateLocationFallbackPhotoDataURL(loc) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 450;
+            const ctx = canvas.getContext('2d');
+
+            // Hàm nhiễu giả ngẫu nhiên theo ID địa điểm
+            let seed = 0;
+            for (let i = 0; i < loc.id.length; i++) seed += loc.id.charCodeAt(i) * (i + 17);
+            const rand = () => {
+                seed = (seed * 9301 + 49297) % 233280;
+                return seed / 233280;
+            };
+
+            if (loc.id === 'jezero') {
+                // Ảnh quỹ đạo HiRISE vùng châu thổ sông Jezero
+                const bg = ctx.createLinearGradient(0, 0, 800, 450);
+                bg.addColorStop(0, '#7c3a22');
+                bg.addColorStop(0.5, '#a85332');
+                bg.addColorStop(1, '#5c2918');
+                ctx.fillStyle = bg;
+                ctx.fillRect(0, 0, 800, 450);
+
+                // Vẽ các lớp trầm tích châu thổ hình quạt (Delta Fan)
+                for (let i = 14; i >= 1; i--) {
+                    ctx.beginPath();
+                    ctx.moveTo(80, 140);
+                    ctx.arc(140, 180, i * 32, -0.45, 0.78);
+                    ctx.closePath();
+                    ctx.fillStyle = i % 2 === 0 ? 'rgba(214, 134, 88, 0.55)' : 'rgba(130, 62, 36, 0.65)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(245, 185, 140, 0.35)';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+
+                // Các hố va chạm nhỏ trên trầm tích
+                for (let c = 0; c < 35; c++) {
+                    const cx = rand() * 800;
+                    const cy = rand() * 450;
+                    const cr = 3 + rand() * 14;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, cr, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(45, 18, 10, 0.45)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(235, 165, 120, 0.35)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            } else if (loc.id === 'olympus') {
+                // Ảnh quỹ đạo núi lửa Olympus Mons & Caldera
+                ctx.fillStyle = '#471f14';
+                ctx.fillRect(0, 0, 800, 450);
+
+                const shieldGrad = ctx.createRadialGradient(400, 225, 25, 400, 225, 340);
+                shieldGrad.addColorStop(0, '#d97b54');
+                shieldGrad.addColorStop(0.45, '#a84d2c');
+                shieldGrad.addColorStop(0.85, '#6b2b18');
+                shieldGrad.addColorStop(1, '#3d180e');
+                ctx.fillStyle = shieldGrad;
+                ctx.beginPath();
+                ctx.arc(400, 225, 330, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Vách đá Basal Scarp
+                ctx.strokeStyle = 'rgba(35, 12, 8, 0.75)';
+                ctx.lineWidth = 7;
+                ctx.beginPath();
+                ctx.arc(400, 225, 275, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Hệ thống hõm chảo Caldera lồng nhau ở đỉnh
+                const calderas = [
+                    { x: 392, y: 220, r: 44 },
+                    { x: 418, y: 232, r: 30 },
+                    { x: 376, y: 238, r: 24 }
+                ];
+                calderas.forEach(cal => {
+                    ctx.beginPath();
+                    ctx.arc(cal.x, cal.y, cal.r, 0, Math.PI * 2);
+                    ctx.fillStyle = '#4a1d12';
+                    ctx.fill();
+                    ctx.strokeStyle = '#f2a279';
+                    ctx.lineWidth = 2.5;
+                    ctx.stroke();
+                });
+            } else if (loc.id === 'valles') {
+                // Ảnh quỹ đạo hẻm núi Valles Marineris
+                ctx.fillStyle = '#9e4c2e';
+                ctx.fillRect(0, 0, 800, 450);
+
+                // Khe nứt hẻm núi chạy ngang
+                ctx.beginPath();
+                ctx.moveTo(0, 175);
+                ctx.bezierCurveTo(220, 140, 520, 210, 800, 165);
+                ctx.lineTo(800, 285);
+                ctx.bezierCurveTo(520, 325, 220, 255, 0, 275);
+                ctx.closePath();
+                ctx.fillStyle = '#3b170e';
+                ctx.fill();
+
+                // Các hẻm nhánh phụ (Chasmata)
+                for (let i = 0; i < 18; i++) {
+                    const x = 60 + i * 40;
+                    ctx.strokeStyle = 'rgba(42, 16, 10, 0.85)';
+                    ctx.lineWidth = 3 + rand() * 5;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 185);
+                    ctx.lineTo(x + (rand() - 0.5) * 45, 110 + rand() * 35);
+                    ctx.moveTo(x, 265);
+                    ctx.lineTo(x + (rand() - 0.5) * 45, 330 + rand() * 35);
+                    ctx.stroke();
+                }
+            } else if (loc.id === 'hellas') {
+                // Bản đồ địa hình quang phổ MOLA Hellas Planitia
+                const molaGrad = ctx.createRadialGradient(400, 225, 30, 400, 225, 360);
+                molaGrad.addColorStop(0, '#1e3a8a');
+                molaGrad.addColorStop(0.45, '#0284c7');
+                molaGrad.addColorStop(0.72, '#16a34a');
+                molaGrad.addColorStop(0.88, '#eab308');
+                molaGrad.addColorStop(1, '#dc2626');
+                ctx.fillStyle = molaGrad;
+                ctx.fillRect(0, 0, 800, 450);
+
+                // Đường đồng mức độ cao
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+                ctx.lineWidth = 1.2;
+                for (let r = 60; r <= 320; r += 45) {
+                    ctx.beginPath();
+                    ctx.ellipse(400, 225, r * 1.35, r * 0.85, 0.1, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            } else {
+                // Ảnh bề mặt hành tinh từ góc nhìn Rover / Lander (Gale, Elysium, Utopia, Gusev)
+                const skyGrad = ctx.createLinearGradient(0, 0, 0, 190);
+                skyGrad.addColorStop(0, '#c27c54');
+                skyGrad.addColorStop(1, '#e6ab83');
+                ctx.fillStyle = skyGrad;
+                ctx.fillRect(0, 0, 800, 190);
+
+                // Dãy núi phía chân trời (Núi Sharp / Đồi Columbia)
+                ctx.beginPath();
+                ctx.moveTo(0, 190);
+                ctx.lineTo(140, 145);
+                ctx.lineTo(340, 105);
+                ctx.lineTo(540, 140);
+                ctx.lineTo(800, 165);
+                ctx.lineTo(800, 190);
+                ctx.closePath();
+                ctx.fillStyle = '#8c482b';
+                ctx.fill();
+
+                // Mặt đất regolith & đá bazan
+                const groundGrad = ctx.createLinearGradient(0, 185, 0, 450);
+                groundGrad.addColorStop(0, '#9e4e2e');
+                groundGrad.addColorStop(1, '#5e2916');
+                ctx.fillStyle = groundGrad;
+                ctx.fillRect(0, 185, 800, 265);
+
+                // Đá cuội & tầng đá trầm tích trên bề mặt
+                for (let i = 0; i < 95; i++) {
+                    const rx = rand() * 800;
+                    const ry = 195 + rand() * 250;
+                    const scale = (ry - 180) / 270;
+                    const rw = (4 + rand() * 24) * scale;
+                    const rh = rw * (0.45 + rand() * 0.3);
+                    ctx.fillStyle = i % 3 === 0 ? '#421c10' : (i % 2 === 0 ? '#78361e' : '#b8633e');
+                    ctx.beginPath();
+                    ctx.ellipse(rx, ry, rw, rh, (rand() - 0.5) * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Nhãn thông tin dữ liệu khoa học góc ảnh
+            ctx.fillStyle = 'rgba(7, 11, 19, 0.72)';
+            ctx.fillRect(14, 14, 290, 28);
+            ctx.strokeStyle = 'rgba(0, 229, 255, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(14, 14, 290, 28);
+            ctx.fillStyle = '#38bdf8';
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText(`USGS/NASA RECONSTRUCTION • ${loc.realPhoto.id}`, 24, 32);
+
+            return canvas.toDataURL('image/jpeg', 0.92);
+        }
+
+        /**
+         * ============================================================================
+         * 5. NỘI DUNG BẢNG TRÍCH DẪN NGUỒN DỮ LIỆU & HÌNH ẢNH (CREDITS MODAL)
+         * ============================================================================
+         */
+        function renderCreditsModalContent() {
+            const container = document.getElementById('credits-modal-body');
+            if (!container) return;
+
+            if (currentLang === 'vi') {
+                container.innerHTML = `
+                    <div class="bg-slate-900/80 p-4 rounded-xl border border-cyan-500/30 space-y-2.5">
+                        <h3 class="text-sm font-bold text-cyan-400 uppercase tracking-wider">
+                            1. Các Lớp Bản Đồ Toàn Cầu Chuẩn NASA Mars Trek & USGS
+                        </h3>
+                        <ul class="space-y-2 text-slate-300 leading-relaxed list-disc pl-4">
+                            <li><strong class="text-white">Lớp Màu Thực (True Color Unlit Mosaic):</strong> Ghép ảnh màu toàn cầu từ <em>Viking Orbiter MDIM 2.1</em> & <em>ESA/MPS OSIRIS</em> được hiệu chỉnh chiếu sáng đồng đều (không bóng tối ngày-đêm). Nguồn: <span class="text-cyan-300 font-mono">NASA/JPL-Caltech/USGS Astrogeology Science Center</span>.</li>
+                            <li><strong class="text-white">Lớp Địa Hình Độ Cao (MOLA Shaded Relief):</strong> Dữ liệu đo cao laser <em>MOLA</em> (463m/pixel). Nguồn: <span class="text-cyan-300 font-mono">NASA Goddard Space Flight Center (GSFC) / MOLA Science Team</span>.</li>
+                            <li><strong class="text-white">Lớp Bản Đồ Địa Chất (USGS SIM 3292):</strong> Bản đồ địa chất toàn cầu <em>"Geologic Map of Mars"</em> (Tanaka et al., 2014). Nguồn: <span class="text-cyan-300 font-mono">U.S. Geological Survey (USGS) SIM 3292</span>.</li>
+                            <li><strong class="text-white">Lớp Hồng Ngoại Ngày/Đêm (THEMIS IR Day/Night Global Mosaic):</strong> Dữ liệu ảnh hồng ngoại bức xạ nhiệt cả ban ngày lẫn ban đêm từ camera <em>THEMIS</em> trên tàu Mars Odyssey. Nguồn: <span class="text-cyan-300 font-mono">NASA/JPL-Caltech/Arizona State University (ASU)</span>.</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-slate-900/80 p-4 rounded-xl border border-orange-500/30 space-y-2.5">
+                        <h3 class="text-sm font-bold text-orange-400 uppercase tracking-wider">
+                            2. Nguồn Hình Ảnh Thực Tế Từng Khu Vực (NASA Photojournal)
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Hố Jezero (Perseverance)</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA24428</span> — MRO HiRISE. Credit: NASA/JPL-Caltech/Univ. of Arizona.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Hố Gale & Núi Sharp (Curiosity)</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA17944</span> — Curiosity Mastcam. Credit: NASA/JPL-Caltech/MSSS.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Núi lửa Olympus Mons</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA02982</span> — Viking Orbiter. Credit: NASA/JPL & MGS.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Hẻm núi Valles Marineris</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA00422</span> — Viking MDIM 2.1. Credit: NASA/JPL-Caltech/USGS.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Đồng bằng Elysium (InSight)</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA22876</span> — InSight IDC. Credit: NASA/JPL-Caltech.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Đồng bằng Utopia Planitia</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA00568</span> — Viking 2 Lander. Credit: NASA/JPL.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Hố Gusev (Spirit Rover)</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA03271</span> — Spirit Pancam. Credit: NASA/JPL-Caltech/Cornell.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Bồn địa Hellas Planitia</div>
+                                <div class="text-slate-400">Mã ảnh: <span class="text-amber-300 font-mono">PIA02819</span> — MOLA Topography. Credit: NASA/GSFC/MOLA Science Team.</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <div class="bg-slate-900/80 p-4 rounded-xl border border-cyan-500/30 space-y-2.5">
+                        <h3 class="text-sm font-bold text-cyan-400 uppercase tracking-wider">
+                            1. Global Planetary Map Layers (NASA Mars Trek & USGS)
+                        </h3>
+                        <ul class="space-y-2 text-slate-300 leading-relaxed list-disc pl-4">
+                            <li><strong class="text-white">True Color Unlit Mosaic:</strong> Uniformly illuminated global color basemap from <em>Viking Orbiter MDIM 2.1</em> & <em>ESA/MPS OSIRIS</em> with zero day-night shadow terminator. Credit: <span class="text-cyan-300 font-mono">NASA/JPL-Caltech/USGS Astrogeology</span>.</li>
+                            <li><strong class="text-white">MOLA Shaded Relief Elevation:</strong> Laser altimetry topography from <em>MOLA</em>. Credit: <span class="text-cyan-300 font-mono">NASA GSFC / MOLA Science Team</span>.</li>
+                            <li><strong class="text-white">USGS Geologic Map (SIM 3292):</strong> Global stratigraphy from <em>"Geologic Map of Mars"</em> (Tanaka et al., 2014). Credit: <span class="text-cyan-300 font-mono">USGS SIM 3292</span>.</li>
+                            <li><strong class="text-white">Thermal IR Day/Night (THEMIS IR Day/Night Global Mosaic):</strong> Combined daytime & nighttime thermal infrared imaging from Mars Odyssey <em>THEMIS</em>. Credit: <span class="text-cyan-300 font-mono">NASA/JPL-Caltech/ASU</span>.</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-slate-900/80 p-4 rounded-xl border border-orange-500/30 space-y-2.5">
+                        <h3 class="text-sm font-bold text-orange-400 uppercase tracking-wider">
+                            2. Authentic Spacecraft Imagery Credits (NASA Photojournal)
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Jezero Crater (Perseverance)</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA24428</span> — MRO HiRISE. Credit: NASA/JPL/Univ. of Arizona.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Gale Crater & Mount Sharp (Curiosity)</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA17944</span> — Curiosity Mastcam. Credit: NASA/JPL/MSSS.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Olympus Mons Shield Volcano</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA02982</span> — Viking Orbiter. Credit: NASA/JPL & MGS.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Valles Marineris Canyon</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA00422</span> — Viking MDIM 2.1. Credit: NASA/JPL/USGS.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Elysium Planitia (InSight)</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA22876</span> — InSight IDC. Credit: NASA/JPL.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Utopia Planitia Basin</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA00568</span> — Viking 2 Lander. Credit: NASA/JPL.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Gusev Crater (Spirit Rover)</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA03271</span> — Spirit Pancam. Credit: NASA/JPL/Cornell.</div>
+                            </div>
+                            <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                                <div class="font-bold text-white">• Hellas Planitia Basin</div>
+                                <div class="text-slate-400">Image ID: <span class="text-amber-300 font-mono">PIA02819</span> — MOLA Topography. Credit: NASA/GSFC/MOLA Team.</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 6. KHỞI TẠO HỆ THỐNG THREE.JS (3D GLOBE CHIẾU SÁNG ĐỀU) & BẢN ĐỒ PHẲNG 2D
+         * ============================================================================
+         */
+        let scene, camera, renderer, marsMesh, atmosphereMesh, gridMesh, starField;
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let targetRotation = { x: 0.25, y: -1.3 };
+        let currentRotation = { x: 0.25, y: -1.3 };
+        let targetZoom = 15;
+        let currentZoom = 15;
+        let autoRotate = true;
+
+        let viewMode = '3d';
+        let currentMapMode = 'truecolor';
+        let selectedLocationId = null;
+
+        let flatMapState = {
+            zoom: 1.0,
+            panX: 0,
+            panY: 0,
+            isPanning: false,
+            startX: 0,
+            startY: 0
+        };
+
+        const markerElements = [];
+        let marsTextures = {};
+        let mapCanvases = {};
+        let layerSourceType = {
+            truecolor: 'loading',
+            elevation: 'loading',
+            geology: 'loading',
+            thermal: 'loading'
+        };
+
+        /**
+         * Sinh bộ bản đồ dự phòng (Fallback Procedural Maps) khớp chuẩn tọa độ kinh/vĩ tuyến
+         * trong trường hợp mất kết nối Internet hoặc máy chủ NASA/Wikimedia bị chặn.
+         */
+        function generateFallbackCanvases() {
+            const width = 1024;
+            const height = 512;
+
+            const createLayerCanvas = () => {
+                const c = document.createElement('canvas');
+                c.width = width;
+                c.height = height;
+                return { canvas: c, ctx: c.getContext('2d') };
+            };
+
+            const colorObj = createLayerCanvas();
+            const molaObj = createLayerCanvas();
+            const geoObj = createLayerCanvas();
+            const thermalObj = createLayerCanvas();
+
+            const colorImg = colorObj.ctx.createImageData(width, height);
+            const molaImg = molaObj.ctx.createImageData(width, height);
+            const geoImg = geoObj.ctx.createImageData(width, height);
+            const thermalImg = thermalObj.ctx.createImageData(width, height);
+
+            function hash(x, y, z) {
+                let h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+                return h - Math.floor(h);
+            }
+
+            function noise3D(x, y, z) {
+                const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+                const fx = x - ix, fy = y - iy, fz = z - iz;
+                const ux = fx * fx * (3 - 2 * fx);
+                const uy = fy * fy * (3 - 2 * fy);
+                const uz = fz * fz * (3 - 2 * fz);
+
+                const n000 = hash(ix, iy, iz), n100 = hash(ix + 1, iy, iz);
+                const n010 = hash(ix, iy + 1, iz), n110 = hash(ix + 1, iy + 1, iz);
+                const n001 = hash(ix, iy, iz + 1), n101 = hash(ix + 1, iy, iz + 1);
+                const n011 = hash(ix, iy + 1, iz + 1), n111 = hash(ix + 1, iy + 1, iz + 1);
+
+                const nx00 = n000 + (n100 - n000) * ux;
+                const nx10 = n010 + (n110 - n010) * ux;
+                const nx01 = n001 + (n101 - n001) * ux;
+                const nx11 = n011 + (n111 - n011) * ux;
+
+                return (nx00 + (nx10 - nx00) * uy) + ((nx01 + (nx11 - nx01) * uy) - (nx00 + (nx10 - nx00) * uy)) * uz;
+            }
+
+            function fbm(x, y, z, octaves = 5) {
+                let value = 0, amp = 0.5, freq = 1.8;
+                for (let i = 0; i < octaves; i++) {
+                    value += amp * noise3D(x * freq, y * freq, z * freq);
+                    freq *= 2.1;
+                    amp *= 0.5;
+                }
+                return value;
+            }
+
+            for (let y = 0; y < height; y++) {
+                const v = y / height;
+                const lat = (0.5 - v) * Math.PI;
+                const cosLat = Math.cos(lat);
+                const sinLat = Math.sin(lat);
+
+                for (let x = 0; x < width; x++) {
+                    const u = x / width;
+                    const lon = (u - 0.5) * Math.PI * 2;
+
+                    const nx = cosLat * Math.cos(lon);
+                    const ny = sinLat;
+                    const nz = cosLat * Math.sin(lon);
+
+                    const dichotomyBoundary = Math.sin(lon * 2.0 + 0.6) * 0.14 + (fbm(nx * 2, ny * 2, nz * 2, 3) - 0.5) * 0.18;
+                    let elevation = fbm(nx + 1.2, ny + 0.5, nz - 0.8);
+                    if (lat < dichotomyBoundary) elevation += 0.15;
+                    else elevation -= 0.09;
+
+                    // Olympus Mons
+                    const distOlympus = Math.hypot(nx - Math.cos(0.325)*Math.cos(-2.335), ny - Math.sin(0.325), nz - Math.cos(0.325)*Math.sin(-2.335));
+                    const isVolcanicProvince = distOlympus < 0.34;
+                    if (distOlympus < 0.24) elevation += (0.24 - distOlympus) * 2.2;
+
+                    // Valles Marineris
+                    const dLatValles = Math.abs(lat - (-0.242));
+                    const dLonValles = Math.abs(lon - (-1.033));
+                    const isCanyon = dLatValles < 0.055 && dLonValles < 0.42;
+                    if (isCanyon) elevation -= (1 - dLatValles / 0.055) * (1 - dLonValles / 0.42) * 0.45;
+
+                    // Hellas Planitia
+                    const distHellas = Math.hypot(nx - Math.cos(-0.74)*Math.cos(1.23), ny - Math.sin(-0.74), nz - Math.cos(-0.74)*Math.sin(1.23));
+                    const isBasin = distHellas < 0.34;
+                    if (distHellas < 0.32) elevation -= (0.32 - distHellas) * 1.1;
+
+                    elevation = Math.max(0, Math.min(1, elevation));
+                    const idx = (y * width + x) * 4;
+                    const isPolarCap = Math.abs(lat) > 1.36 + (elevation - 0.5) * 0.12;
+                    const darkRegion = fbm(nx * 2.5 - 2.1, ny * 2.5 + 1.4, nz * 2.5, 4);
+
+                    // 1. True Color (Sáng rõ đồng đều, không có bóng tối ngày-đêm)
+                    let r, g, b;
+                    if (isPolarCap) { r = 245; g = 247; b = 252; }
+                    else if (darkRegion < 0.43) { r = 128 + elevation * 52; g = 66 + elevation * 32; b = 46 + elevation * 22; }
+                    else { r = 198 + elevation * 52; g = 102 + elevation * 42; b = 60 + elevation * 25; }
+                    colorImg.data[idx] = Math.min(255, r); colorImg.data[idx + 1] = Math.min(255, g); colorImg.data[idx + 2] = Math.min(255, b); colorImg.data[idx + 3] = 255;
+
+                    // 2. MOLA Elevation
+                    let mr, mg, mb;
+                    if (elevation < 0.25) { const t = elevation / 0.25; mr = 20; mg = Math.floor(50 + t * 160); mb = Math.floor(160 + t * 80); }
+                    else if (elevation < 0.5) { const t = (elevation - 0.25) / 0.25; mr = Math.floor(20 + t * 60); mg = Math.floor(210 - t * 20); mb = Math.floor(240 - t * 180); }
+                    else if (elevation < 0.75) { const t = (elevation - 0.5) / 0.25; mr = Math.floor(80 + t * 170); mg = Math.floor(190 + t * 30); mb = Math.floor(60 - t * 40); }
+                    else { const t = (elevation - 0.75) / 0.25; mr = 250; mg = Math.floor(220 - t * 160 + t * 190); mb = Math.floor(20 + t * 230); }
+                    molaImg.data[idx] = mr; molaImg.data[idx + 1] = mg; molaImg.data[idx + 2] = mb; molaImg.data[idx + 3] = 255;
+
+                    // 3. Geology USGS SIM 3292
+                    const unitNoise = fbm(nx * 4.5 + 3.1, ny * 4.5 - 1.7, nz * 4.5 + 0.9, 3);
+                    let gr, gg, gb;
+                    if (isPolarCap) { gr = 241; gg = 245; gb = 249; }
+                    else if (isVolcanicProvince) { gr = 220; gg = 38; gb = 38; }
+                    else if (isBasin || isCanyon) { gr = 2; gg = 132; gb = 199; }
+                    else if (lat < dichotomyBoundary) {
+                        if (unitNoise > 0.58) { gr = 217; gg = 119; gb = 6; }
+                        else { gr = 180; gg = 83; gb = 9; }
+                    } else {
+                        if (unitNoise > 0.48) { gr = 21; gg = 128; gb = 61; }
+                        else { gr = 234; gg = 179; gb = 8; }
+                    }
+                    const shade = 0.86 + elevation * 0.28;
+                    geoImg.data[idx] = Math.min(255, gr * shade); geoImg.data[idx + 1] = Math.min(255, gg * shade); geoImg.data[idx + 2] = Math.min(255, gb * shade); geoImg.data[idx + 3] = 255;
+
+                    // 4. Thermal IR Day/Night (Quán tính nhiệt đá gốc + địa hình)
+                    const rockExposure = Math.max(0, (0.58 - darkRegion) * 1.9) + (isCanyon ? 0.38 : 0);
+                    const thermalVal = Math.max(18, Math.min(248, Math.floor(38 + rockExposure * 180 + (elevation - 0.5) * 45)));
+                    thermalImg.data[idx] = thermalVal; thermalImg.data[idx + 1] = Math.min(255, Math.floor(thermalVal * 1.01)); thermalImg.data[idx + 2] = Math.min(255, Math.floor(thermalVal * 1.05)); thermalImg.data[idx + 3] = 255;
+                }
+            }
+
+            colorObj.ctx.putImageData(colorImg, 0, 0);
+            molaObj.ctx.putImageData(molaImg, 0, 0);
+            geoObj.ctx.putImageData(geoImg, 0, 0);
+            thermalObj.ctx.putImageData(thermalImg, 0, 0);
+
+            return {
+                truecolor: colorObj.canvas,
+                elevation: molaObj.canvas,
+                geology: geoObj.canvas,
+                thermal: thermalObj.canvas
+            };
+        }
+
+        /**
+         * Hàm tải ảnh bản đồ thực tế từ NASA/Wikimedia với cơ chế thử nhiều URL & CORS an toàn
+         */
+        function loadImageWithFallback(urls, fallbackCanvas, layerKey, onLoaded) {
+            let index = 0;
+
+            function tryNext() {
+                if (index >= urls.length) {
+                    layerSourceType[layerKey] = 'fallback';
+                    onLoaded(fallbackCanvas, false);
+                    return;
+                }
+
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                const url = urls[index++];
+
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 2048;
+                    canvas.height = 1024;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    layerSourceType[layerKey] = 'nasa_real';
+                    onLoaded(canvas, true);
+                };
+
+                img.onerror = () => {
+                    tryNext();
+                };
+
+                img.src = url;
+            }
+
+            tryNext();
+        }
+
+        /**
+         * Tải toàn bộ 4 lớp bản đồ thật NASA/USGS
+         */
+        function loadAllNasaMapLayers(onReady) {
+            const fallbacks = generateFallbackCanvases();
+
+            mapCanvases = { ...fallbacks };
+            marsTextures = {
+                truecolor: new THREE.CanvasTexture(fallbacks.truecolor),
+                elevation: new THREE.CanvasTexture(fallbacks.elevation),
+                geology: new THREE.CanvasTexture(fallbacks.geology),
+                thermal: new THREE.CanvasTexture(fallbacks.thermal)
+            };
+
+            const keys = ['truecolor', 'elevation', 'geology', 'thermal'];
+            let completed = 0;
+
+            keys.forEach(key => {
+                loadImageWithFallback(NASA_GLOBAL_MAP_SOURCES[key], fallbacks[key], key, (canvas) => {
+                    mapCanvases[key] = canvas;
+                    const tex = new THREE.CanvasTexture(canvas);
+                    tex.needsUpdate = true;
+
+                    marsTextures[key] = tex;
+                    if (marsMesh && currentMapMode === key) {
+                        marsMesh.material.map = tex;
+                        marsMesh.material.needsUpdate = true;
+                    }
+
+                    updateMapSourceBadge();
+                    if (viewMode === '2d' && currentMapMode === key) {
+                        renderFlatMap();
+                    }
+
+                    completed++;
+                    if (completed === 1 && onReady) {
+                        onReady();
+                    }
+                });
+            });
+        }
+
+        function updateMapSourceBadge() {
+            const badge = document.getElementById('map-source-status');
+            if (!badge) return;
+            const status = layerSourceType[currentMapMode];
+            if (status === 'nasa_real') {
+                badge.textContent = currentLang === 'vi' ? 'BẢN ĐỒ THẬT NASA (KHÔNG BÓNG)' : 'NASA REAL UNLIT MAP';
+                badge.className = 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/35';
+            } else if (status === 'loading') {
+                badge.textContent = currentLang === 'vi' ? 'ĐANG TẢI NASA...' : 'LOADING NASA...';
+                badge.className = 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/35';
+            } else {
+                badge.textContent = currentLang === 'vi' ? 'BẢN ĐỒ USGS TOÀN PHẦN' : 'USGS UNLIT FULL MAP';
+                badge.className = 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/35';
+            }
+        }
+
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = currentZoom;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            // Tạo bầu trời sao vũ trụ 3D
+            const starGeo = new THREE.BufferGeometry();
+            const starCount = 3500;
+            const starPos = new Float32Array(starCount * 3);
+            const starColors = new Float32Array(starCount * 3);
+            for (let i = 0; i < starCount * 3; i += 3) {
+                const r = 120 + Math.random() * 180;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                starPos[i] = r * Math.sin(phi) * Math.cos(theta);
+                starPos[i + 1] = r * Math.sin(phi) * Math.sin(theta);
+                starPos[i + 2] = r * Math.cos(phi);
+
+                const tint = Math.random();
+                starColors[i] = tint > 0.8 ? 0.7 : 1.0;
+                starColors[i + 1] = tint < 0.2 ? 0.85 : 0.95;
+                starColors[i + 2] = 1.0;
+            }
+            starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+            starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+            const starMat = new THREE.PointsMaterial({ size: 0.45, vertexColors: true, transparent: true, opacity: 0.85 });
+            starField = new THREE.Points(starGeo, starMat);
+            scene.add(starField);
+
+            // KHỐI CẦU SAO HỎA CHÍNH: Sử dụng MeshBasicMaterial (Unlit) để bề mặt được chiếu sáng 100% đồng đều,
+            // hoàn toàn loại bỏ bóng tối nửa bán cầu, giúp quan sát mọi địa điểm rõ nét như bản đồ 2D.
+            const marsGeo = new THREE.SphereGeometry(5, 96, 96);
+            const marsMat = new THREE.MeshBasicMaterial({
+                map: marsTextures.truecolor
+            });
+            marsMesh = new THREE.Mesh(marsGeo, marsMat);
+            scene.add(marsMesh);
+
+            // Viền khí quyển mỏng phát sáng nhẹ quanh rìa hành tinh
+            const atmosGeo = new THREE.SphereGeometry(5.12, 64, 64);
+            const atmosMat = new THREE.MeshBasicMaterial({
+                color: 0xff6b35,
+                transparent: true,
+                opacity: 0.08,
+                side: THREE.BackSide
+            });
+            atmosphereMesh = new THREE.Mesh(atmosGeo, atmosMat);
+            scene.add(atmosphereMesh);
+
+            // Lưới tọa độ kinh tuyến / vĩ tuyến
+            const gridGeo = new THREE.SphereGeometry(5.03, 24, 12);
+            const gridMat = new THREE.MeshBasicMaterial({
+                color: 0x00e5ff,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.22
+            });
+            gridMesh = new THREE.Mesh(gridGeo, gridMat);
+            gridMesh.visible = false;
+            marsMesh.add(gridMesh);
+
+            // Ánh sáng môi trường toàn phần (không dùng DirectionalLight tạo bóng tối một phía)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+            scene.add(ambientLight);
+
+            createMarkers();
+            setupInteractions();
+            applyLanguage('vi');
+        }
+
+        /**
+         * Chuyển đổi tọa độ hành tinh (Planetocentric Latitude, East Longitude 0-360°)
+         * sang tọa độ 3D khớp 100% với bản đồ Equirectangular của NASA/USGS (Prime Meridian 0° tại u=0.5).
+         */
+        function latLonToVector3(lat, lonEast, radius) {
+            let lon180 = ((lonEast + 180) % 360) - 180;
+            const phi = (90 - lat) * (Math.PI / 180);
+            const theta = (lon180 + 180) * (Math.PI / 180);
+
+            const x = -(radius * Math.sin(phi) * Math.cos(theta));
+            const z = (radius * Math.sin(phi) * Math.sin(theta));
+            const y = (radius * Math.cos(phi));
+
+            return new THREE.Vector3(x, y, z);
+        }
+
+        function createMarkers() {
+            const overlay = document.getElementById('markers-overlay');
+            overlay.innerHTML = '';
+            markerElements.length = 0;
+
+            MARS_LOCATIONS.forEach(loc => {
+                const pos = latLonToVector3(loc.lat, loc.lon, 5.04);
+                const anchor = new THREE.Object3D();
+                anchor.position.copy(pos);
+                marsMesh.add(anchor);
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'mars-marker-label';
+                const isLanding = loc.type === 'landing';
+
+                labelDiv.innerHTML = `
+                    <div class="marker-tag ${isLanding ? 'landing-tag' : ''}">
+                        ${loc[currentLang].shortName}
+                    </div>
+                    <div class="marker-pin ${isLanding ? 'landing-site' : ''}"></div>
+                `;
+
+                labelDiv.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    focusOnLocation(loc.id);
+                });
+
+                overlay.appendChild(labelDiv);
+                markerElements.push({ data: loc, anchor: anchor, element: labelDiv });
+            });
+        }
+
+        function getFlatMapBounds() {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const baseW = Math.min(vw * 0.92, (vh * 0.78) * 2);
+            const baseH = baseW / 2;
+
+            const drawW = baseW * flatMapState.zoom;
+            const drawH = baseH * flatMapState.zoom;
+            const drawX = (vw - drawW) / 2 + flatMapState.panX;
+            const drawY = (vh - drawH) / 2 + flatMapState.panY;
+
+            return { drawX, drawY, drawW, drawH };
+        }
+
+        function lonToNormalizedU(lonEast) {
+            let lon180 = ((lonEast + 180) % 360 + 360) % 360 - 180;
+            return (lon180 + 180) / 360;
+        }
+
+        function renderFlatMap() {
+            if (viewMode !== '2d' || !mapCanvases) return;
+
+            const canvas = document.getElementById('flat-map-canvas');
+            const ctx = canvas.getContext('2d');
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const { drawX, drawY, drawW, drawH } = getFlatMapBounds();
+            const sourceCanvas = mapCanvases[currentMapMode] || mapCanvases.truecolor;
+
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 229, 255, 0.25)';
+            ctx.shadowBlur = 24;
+            ctx.strokeStyle = 'rgba(0, 229, 255, 0.45)';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2);
+            ctx.restore();
+
+            ctx.drawImage(sourceCanvas, drawX, drawY, drawW, drawH);
+
+            if (gridMesh && gridMesh.visible) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(0, 229, 255, 0.38)';
+                ctx.fillStyle = 'rgba(186, 230, 253, 0.9)';
+                ctx.font = '10px monospace';
+                ctx.lineWidth = 1;
+
+                for (let lat = -60; lat <= 60; lat += 30) {
+                    const y = drawY + ((90 - lat) / 180) * drawH;
+                    ctx.beginPath();
+                    ctx.moveTo(drawX, y);
+                    ctx.lineTo(drawX + drawW, y);
+                    ctx.stroke();
+                    ctx.fillText(`${lat === 0 ? '0° EQ' : (lat > 0 ? lat + '°N' : Math.abs(lat) + '°S')}`, drawX + 6, y - 4);
+                }
+
+                for (let lon = -180; lon <= 180; lon += 45) {
+                    const x = drawX + ((lon + 180) / 360) * drawW;
+                    ctx.beginPath();
+                    ctx.moveTo(x, drawY);
+                    ctx.lineTo(x, drawY + drawH);
+                    ctx.stroke();
+                    if (lon < 180) {
+                        const lonEastLabel = (lon + 360) % 360;
+                        ctx.fillText(`${lon === 0 ? '0° PM' : lonEastLabel + '°E'}`, x + 4, drawY + drawH - 6);
+                    }
+                }
+                ctx.restore();
+            }
+        }
+
+        function updateMarkersPosition() {
+            if (viewMode === '2d') {
+                const { drawX, drawY, drawW, drawH } = getFlatMapBounds();
+                markerElements.forEach(item => {
+                    const u = lonToNormalizedU(item.data.lon);
+                    const v = (90 - item.data.lat) / 180;
+                    const x = drawX + u * drawW;
+                    const y = drawY + v * drawH;
+
+                    item.element.style.display = 'block';
+                    item.element.style.left = `${x}px`;
+                    item.element.style.top = `${y}px`;
+                    item.element.style.opacity = '1';
+                });
+                return;
+            }
+
+            const tempV = new THREE.Vector3();
+            const cameraDir = new THREE.Vector3();
+            camera.getWorldPosition(cameraDir);
+
+            markerElements.forEach(item => {
+                item.anchor.getWorldPosition(tempV);
+                const normal = tempV.clone().normalize();
+                const viewDir = cameraDir.clone().sub(tempV).normalize();
+                const dot = normal.dot(viewDir);
+
+                if (dot > 0.15) {
+                    tempV.project(camera);
+                    const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (tempV.y * -0.5 + 0.5) * window.innerHeight;
+
+                    item.element.style.display = 'block';
+                    item.element.style.left = `${x}px`;
+                    item.element.style.top = `${y}px`;
+                    item.element.style.opacity = dot < 0.3 ? (dot - 0.15) / 0.15 : 1;
+                } else {
+                    item.element.style.display = 'none';
+                }
+            });
+        }
+
+        function setViewMode(mode) {
+            viewMode = mode;
+            const container3D = document.getElementById('canvas-container');
+            const container2D = document.getElementById('flat-map-container');
+            const btn3D = document.getElementById('mode-3d');
+            const btn2D = document.getElementById('mode-2d');
+            const projBadge = document.getElementById('ui-projection-badge');
+
+            if (mode === '3d') {
+                container3D.style.display = 'block';
+                container2D.style.display = 'none';
+                btn3D.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/25 text-cyan-300 border border-cyan-400 transition flex items-center gap-1.5';
+                btn2D.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800/70 text-slate-400 border border-transparent hover:text-slate-200 transition flex items-center gap-1.5';
+                projBadge.textContent = '3D SPHERE';
+            } else {
+                container3D.style.display = 'none';
+                container2D.style.display = 'block';
+                btn2D.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/25 text-cyan-300 border border-cyan-400 transition flex items-center gap-1.5';
+                btn3D.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800/70 text-slate-400 border border-transparent hover:text-slate-200 transition flex items-center gap-1.5';
+                projBadge.textContent = 'EQUIRECTANGULAR 2D';
+                renderFlatMap();
+            }
+            updateMarkersPosition();
+        }
+
+        function setMapLayer(layerName) {
+            currentMapMode = layerName;
+            if (marsMesh && marsTextures[layerName]) {
+                marsMesh.material.map = marsTextures[layerName];
+                marsMesh.material.needsUpdate = true;
+            }
+
+            document.querySelectorAll('.layer-btn').forEach(btn => {
+                if (btn.dataset.layer === layerName) {
+                    btn.className = 'layer-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-400 transition text-left';
+                } else {
+                    btn.className = 'layer-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition text-left';
+                }
+            });
+
+            document.getElementById('elevation-legend').classList.toggle('hidden', layerName !== 'elevation');
+            document.getElementById('geology-legend').classList.toggle('hidden', layerName !== 'geology');
+            document.getElementById('thermal-legend').classList.toggle('hidden', layerName !== 'thermal');
+
+            updateMapSourceBadge();
+            if (viewMode === '2d') renderFlatMap();
+        }
+
+        function applyLanguage(lang) {
+            currentLang = lang;
+            const t = UI_TEXT[lang];
+
+            const btnVi = document.getElementById('lang-vi');
+            const btnEn = document.getElementById('lang-en');
+            if (lang === 'vi') {
+                btnVi.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold bg-orange-500/25 text-orange-300 border border-orange-400 transition';
+                btnEn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800/70 text-slate-400 border border-transparent hover:text-slate-200 transition';
+            } else {
+                btnEn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold bg-orange-500/25 text-orange-300 border border-orange-400 transition';
+                btnVi.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800/70 text-slate-400 border border-transparent hover:text-slate-200 transition';
+            }
+
+            document.getElementById('ui-subtitle').textContent = t.subtitle;
+            document.getElementById('ui-mode-3d').textContent = t.mode3d;
+            document.getElementById('ui-mode-2d').textContent = t.mode2d;
+            document.getElementById('ui-btn-credits').textContent = t.btnCredits;
+            document.getElementById('ui-layers-title').textContent = t.layersTitle;
+            document.getElementById('ui-layer-truecolor').textContent = t.layerTrueColor;
+            document.getElementById('ui-layer-elevation').textContent = t.layerElevation;
+            document.getElementById('ui-layer-geology').textContent = t.layerGeology;
+            document.getElementById('ui-layer-thermal').textContent = t.layerThermal;
+            document.getElementById('ui-btn-grid').textContent = t.btnGrid;
+            document.getElementById('ui-btn-rotate').textContent = t.btnRotate;
+            document.getElementById('ui-elev-min').textContent = t.elevMin;
+            document.getElementById('ui-elev-max').textContent = t.elevMax;
+            document.getElementById('ui-geo-legend-title').textContent = t.geoLegendTitle;
+            document.getElementById('ui-geo-noachian').textContent = t.geoNoachian;
+            document.getElementById('ui-geo-hesperian').textContent = t.geoHesperian;
+            document.getElementById('ui-geo-amazonian').textContent = t.geoAmazonian;
+            document.getElementById('ui-geo-volcanic').textContent = t.geoVolcanic;
+            document.getElementById('ui-geo-basin').textContent = t.geoBasin;
+            document.getElementById('ui-geo-polar').textContent = t.geoPolar;
+            document.getElementById('ui-therm-low').textContent = t.thermLow;
+            document.getElementById('ui-therm-high').textContent = t.thermHigh;
+            document.getElementById('ui-legend-landing').textContent = t.legendLanding;
+            document.getElementById('ui-legend-geology').textContent = t.legendGeology;
+            document.getElementById('ui-panel-real-photo-title').textContent = t.realPhotoTitle;
+            document.getElementById('ui-btn-zoom-photo').textContent = t.btnZoomPhoto;
+            document.getElementById('panel-visual-caption').textContent = t.visualCaption;
+            document.getElementById('ui-panel-elev-label').textContent = t.elevLabel;
+            document.getElementById('ui-panel-age-label').textContent = t.ageLabel;
+            document.getElementById('ui-panel-size-label').textContent = t.sizeLabel;
+            document.getElementById('ui-panel-geology-title').textContent = t.geologyTitle;
+            document.getElementById('ui-panel-minerals-title').textContent = t.mineralsTitle;
+            document.getElementById('ui-panel-water-title').textContent = t.waterTitle;
+
+            document.getElementById('ui-credits-modal-title').textContent = t.creditsModalTitle;
+            document.getElementById('ui-credits-modal-subtitle').textContent = t.creditsModalSubtitle;
+            document.getElementById('ui-credits-license').textContent = t.creditsLicense;
+            document.getElementById('btn-close-credits-bottom').textContent = t.closeBtn;
+
+            updateMapSourceBadge();
+            renderCreditsModalContent();
+
+            const selector = document.getElementById('location-selector');
+            const prevVal = selector.value;
+            selector.innerHTML = `<option value="">${t.selectPlaceholder}</option>`;
+
+            const groupLanding = document.createElement('optgroup');
+            groupLanding.label = t.groupLanding;
+            const groupGeo = document.createElement('optgroup');
+            groupGeo.label = t.groupGeology;
+
+            MARS_LOCATIONS.forEach(loc => {
+                const opt = document.createElement('option');
+                opt.value = loc.id;
+                opt.textContent = `${loc[lang].name} (${loc[lang].shortName})`;
+                if (loc.type === 'landing') groupLanding.appendChild(opt);
+                else groupGeo.appendChild(opt);
+            });
+
+            selector.appendChild(groupLanding);
+            selector.appendChild(groupGeo);
+            selector.value = prevVal;
+
+            markerElements.forEach(item => {
+                const tagEl = item.element.querySelector('.marker-tag');
+                if (tagEl) tagEl.textContent = item.data[lang].shortName;
+            });
+
+            if (selectedLocationId) {
+                const loc = MARS_LOCATIONS.find(l => l.id === selectedLocationId);
+                if (loc) openDetailPanel(loc);
+            }
+        }
+
+        function focusOnLocation(locId) {
+            const loc = MARS_LOCATIONS.find(l => l.id === locId);
+            if (!loc) return;
+
+            selectedLocationId = locId;
+            autoRotate = false;
+            updateAutoRotateUI();
+
+            if (viewMode === '3d') {
+                let lon180 = ((loc.lon + 180) % 360) - 180;
+                const targetLonRad = lon180 * (Math.PI / 180);
+                const targetLatRad = loc.lat * (Math.PI / 180);
+
+                targetRotation.y = -targetLonRad - Math.PI / 2;
+                targetRotation.x = targetLatRad * 0.85;
+                targetZoom = 10.5;
+            } else {
+                flatMapState.zoom = 1.85;
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const baseW = Math.min(vw * 0.92, (vh * 0.78) * 2);
+                const baseH = baseW / 2;
+                const drawW = baseW * flatMapState.zoom;
+                const drawH = baseH * flatMapState.zoom;
+
+                const u = lonToNormalizedU(loc.lon);
+                const v = (90 - loc.lat) / 180;
+                const offsetX = vw > 640 ? -150 : 0;
+
+                flatMapState.panX = (0.5 - u) * drawW + offsetX;
+                flatMapState.panY = (0.5 - v) * drawH;
+                renderFlatMap();
+                updateMarkersPosition();
+            }
+
+            document.getElementById('location-selector').value = locId;
+            openDetailPanel(loc);
+        }
+
+        function generateGeologicalSVG(type) {
+            const t = UI_TEXT[currentLang];
+            if (type === 'delta') {
+                return `
+                <svg viewBox="0 0 400 160" class="w-full h-full">
+                    <defs>
+                        <linearGradient id="sky1" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#1e1b2e"/>
+                            <stop offset="100%" stop-color="#4a2518"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="400" height="160" fill="url(#sky1)"/>
+                    <line x1="140" y1="65" x2="400" y2="65" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="5,4"/>
+                    <text x="215" y="58" fill="#00e5ff" font-size="10" font-family="monospace">${t.svgDeltaWater}</text>
+                    <path d="M0 160 L0 80 L110 115 L400 135 L400 160 Z" fill="#3b231c"/>
+                    <path d="M80 105 Q160 102 230 128 L110 115 Z" fill="#9a4b2c"/>
+                    <path d="M95 110 Q180 108 265 131 L140 120 Z" fill="#c86d44"/>
+                    <path d="M110 115 Q200 116 300 133 L180 125 Z" fill="#e08d58"/>
+                    <text x="15" y="145" fill="#94a3b8" font-size="10">${t.svgDeltaBase}</text>
+                    <text x="155" y="96" fill="#fed7aa" font-size="10" font-weight="bold">${t.svgDeltaSediment}</text>
+                </svg>`;
+            } else if (type === 'volcano') {
+                return `
+                <svg viewBox="0 0 400 160" class="w-full h-full">
+                    <rect width="400" height="160" fill="#130d14"/>
+                    <path d="M20 150 Q120 125 175 40 L225 40 Q280 125 380 150 Z" fill="#7c2d12"/>
+                    <path d="M175 40 L185 52 L215 52 L225 40 Z" fill="#291510"/>
+                    <path d="M70 135 Q140 110 180 48 L220 48 Q260 110 330 135" fill="none" stroke="#ea580c" stroke-width="2" opacity="0.7"/>
+                    <path d="M110 115 Q160 95 185 52 L215 52 Q240 95 290 115" fill="none" stroke="#fb923c" stroke-width="1.5" opacity="0.6"/>
+                    <line x1="350" y1="40" x2="350" y2="150" stroke="#00e5ff" stroke-width="1"/>
+                    <line x1="345" y1="40" x2="355" y2="40" stroke="#00e5ff" stroke-width="1"/>
+                    <line x1="345" y1="150" x2="355" y2="150" stroke="#00e5ff" stroke-width="1"/>
+                    <text x="265" y="32" fill="#00e5ff" font-size="10" font-family="monospace">${t.svgVolcanoHeight}</text>
+                    <text x="158" y="28" fill="#fdba74" font-size="10" font-weight="bold">${t.svgVolcanoCaldera}</text>
+                </svg>`;
+            } else if (type === 'canyon') {
+                return `
+                <svg viewBox="0 0 400 160" class="w-full h-full">
+                    <rect width="400" height="160" fill="#0f172a"/>
+                    <path d="M0 45 L110 45 L155 135 L245 135 L290 45 L400 45 L400 160 L0 160 Z" fill="#6c2e1c"/>
+                    <line x1="0" y1="70" x2="122" y2="70" stroke="#b45309" stroke-width="3"/>
+                    <line x1="278" y1="70" x2="400" y2="70" stroke="#b45309" stroke-width="3"/>
+                    <line x1="0" y1="95" x2="135" y2="95" stroke="#d97706" stroke-width="3"/>
+                    <line x1="265" y1="95" x2="400" y2="95" stroke="#d97706" stroke-width="3"/>
+                    <rect x="160" y="135" width="80" height="10" fill="#00e5ff" opacity="0.6"/>
+                    <text x="148" y="125" fill="#00e5ff" font-size="10" font-family="monospace">${t.svgCanyonDepth}</text>
+                    <text x="140" y="155" fill="#bae6fd" font-size="9">${t.svgCanyonIce}</text>
+                </svg>`;
+            } else {
+                return `
+                <svg viewBox="0 0 400 160" class="w-full h-full">
+                    <rect width="400" height="160" fill="#131824"/>
+                    <rect x="0" y="65" width="400" height="25" fill="#9a4b2c"/>
+                    <rect x="0" y="90" width="400" height="35" fill="#1e3a5f"/>
+                    <rect x="0" y="125" width="400" height="35" fill="#291d1e"/>
+                    <circle cx="200" cy="58" r="6" fill="#ff5722"/>
+                    <line x1="188" y1="65" x2="195" y2="60" stroke="#cbd5e1" stroke-width="2"/>
+                    <line x1="212" y1="65" x2="205" y2="60" stroke="#cbd5e1" stroke-width="2"/>
+                    <text x="15" y="81" fill="#ffedd5" font-size="10">${t.svgPlainsTop}</text>
+                    <text x="15" y="111" fill="#7dd3fc" font-size="10">${t.svgPlainsMid}</text>
+                    <text x="15" y="146" fill="#94a3b8" font-size="10">${t.svgPlainsBot}</text>
+                </svg>`;
+            }
+        }
+
+        function openDetailPanel(loc) {
+            const panel = document.getElementById('detail-panel');
+            const badge = document.getElementById('panel-badge');
+            const content = loc[currentLang];
+
+            badge.textContent = content.badge;
+            if (loc.type === 'landing') {
+                badge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 border border-orange-500/40';
+            } else {
+                badge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/40';
+            }
+
+            const latSuffix = currentLang === 'vi' ? (loc.lat >= 0 ? 'B' : 'N') : (loc.lat >= 0 ? 'N' : 'S');
+            const lonSuffix = currentLang === 'vi' ? 'Đ' : 'E';
+            document.getElementById('panel-coords').textContent = `${Math.abs(loc.lat)}°${latSuffix}, ${loc.lon}°${lonSuffix}`;
+            document.getElementById('panel-title').textContent = content.name;
+            document.getElementById('panel-subtitle').textContent = content.mission;
+            document.getElementById('panel-elevation').textContent = loc.elevation;
+            document.getElementById('panel-age').textContent = content.age;
+            document.getElementById('panel-size').textContent = content.size;
+            document.getElementById('panel-geology').textContent = content.geology;
+            document.getElementById('panel-water').textContent = content.water;
+            document.getElementById('panel-data-source').textContent = `${currentLang === 'vi' ? 'Nguồn dữ liệu' : 'Data Source'}: ${content.sourceNote}`;
+
+            // HỆ THỐNG TẢI ẢNH ĐA TẦNG + DỰ PHÒNG CANVAS TỰ ĐỘNG (KHÔNG BAO GIỜ LỖI ẢNH)
+            const imgEl = document.getElementById('panel-real-image');
+            const loaderEl = document.getElementById('panel-photo-loader');
+            const fallbackDataUrl = generateLocationFallbackPhotoDataURL(loc);
+
+            // Hiển thị ngay ảnh tái tạo chất lượng cao trong lúc tải ảnh gốc từ máy chủ NASA
+            imgEl.src = fallbackDataUrl;
+            loaderEl.classList.add('hidden');
+
+            let urlIdx = 0;
+            const urls = loc.realPhoto.urls || [];
+
+            function tryLoadRealPhoto() {
+                if (urlIdx >= urls.length) {
+                    imgEl.src = fallbackDataUrl;
+                    return;
+                }
+                const probe = new Image();
+                const currentUrl = urls[urlIdx++];
+                probe.onload = () => {
+                    // Đảm bảo đúng địa điểm đang mở mới gán ảnh
+                    if (selectedLocationId === loc.id && probe.naturalWidth > 50) {
+                        imgEl.src = currentUrl;
+                    }
+                };
+                probe.onerror = () => {
+                    tryLoadRealPhoto();
+                };
+                probe.src = currentUrl;
+            }
+            tryLoadRealPhoto();
+
+            document.getElementById('panel-photo-caption').textContent = currentLang === 'vi' ? loc.realPhoto.captionVi : loc.realPhoto.captionEn;
+            document.getElementById('panel-photo-credit').textContent = `Credit: ${loc.realPhoto.credit}`;
+            document.getElementById('panel-photo-id').textContent = loc.realPhoto.id;
+
+            // Sơ đồ hoạt họa SVG
+            document.getElementById('panel-visual').innerHTML = generateGeologicalSVG(loc.visualType);
+
+            const mineralsContainer = document.getElementById('panel-minerals');
+            mineralsContainer.innerHTML = '';
+            content.minerals.forEach(mineral => {
+                const tag = document.createElement('span');
+                tag.className = 'px-2.5 py-1 rounded-md text-[11px] font-medium bg-orange-950/50 text-orange-200 border border-orange-500/30';
+                tag.textContent = mineral;
+                mineralsContainer.appendChild(tag);
+            });
+
+            panel.classList.remove('translate-x-[120%]');
+        }
+
+        function openPhotoLightbox() {
+            if (!selectedLocationId) return;
+            const loc = MARS_LOCATIONS.find(l => l.id === selectedLocationId);
+            if (!loc) return;
+
+            const modal = document.getElementById('photo-lightbox-modal');
+            document.getElementById('lightbox-title').textContent = `${loc[currentLang].name} (${loc.realPhoto.id})`;
+            document.getElementById('lightbox-credit').textContent = `Credit: ${loc.realPhoto.credit}`;
+            document.getElementById('lightbox-img').src = document.getElementById('panel-real-image').src;
+            document.getElementById('lightbox-caption').textContent = currentLang === 'vi' ? loc.realPhoto.captionVi : loc.realPhoto.captionEn;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeDetailPanel() {
+            document.getElementById('detail-panel').classList.add('translate-x-[120%]');
+            selectedLocationId = null;
+            document.getElementById('location-selector').value = '';
+        }
+
+        function updateAutoRotateUI() {
+            const btn = document.getElementById('toggle-rotate');
+            const dot = document.getElementById('rotate-indicator');
+            if (autoRotate) {
+                btn.className = 'px-2.5 py-1 rounded-lg text-[11px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-400 transition flex items-center gap-1.5';
+                dot.className = 'w-2 h-2 rounded-full bg-cyan-400 animate-pulse';
+            } else {
+                btn.className = 'px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition flex items-center gap-1.5';
+                dot.className = 'w-2 h-2 rounded-full bg-slate-500';
+            }
+        }
+
+        function setupInteractions() {
+            const container3D = document.getElementById('canvas-container');
+            const container2D = document.getElementById('flat-map-container');
+
+            container3D.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                autoRotate = false;
+                updateAutoRotateUI();
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (viewMode === '3d') {
+                    const normX = (e.clientX / window.innerWidth) * 2 - 1;
+                    const normY = -(e.clientY / window.innerHeight) * 2 + 1;
+                    const approxLat = (normY * 90).toFixed(2);
+                    const approxLon = (((normX * 180 - (currentRotation.y * 180 / Math.PI)) % 360 + 360) % 360).toFixed(2);
+                    document.getElementById('coords-display').textContent = `LAT: ${approxLat}° | LON: ${approxLon}°`;
+
+                    if (!isDragging) return;
+                    const deltaMove = {
+                        x: e.clientX - previousMousePosition.x,
+                        y: e.clientY - previousMousePosition.y
+                    };
+                    const zoomFactor = currentZoom / 15;
+                    targetRotation.y += deltaMove.x * 0.005 * zoomFactor;
+                    targetRotation.x += deltaMove.y * 0.005 * zoomFactor;
+                    targetRotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, targetRotation.x));
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                } else {
+                    const { drawX, drawY, drawW, drawH } = getFlatMapBounds();
+                    const u = (e.clientX - drawX) / drawW;
+                    const v = (e.clientY - drawY) / drawH;
+                    if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
+                        const lat = (90 - v * 180).toFixed(2);
+                        const lon180 = u * 360 - 180;
+                        const lonEast = ((lon180 + 360) % 360).toFixed(2);
+                        document.getElementById('coords-display').textContent = `LAT: ${lat}° | LON: ${lonEast}°E`;
+                    }
+
+                    if (flatMapState.isPanning) {
+                        flatMapState.panX += e.clientX - flatMapState.startX;
+                        flatMapState.panY += e.clientY - flatMapState.startY;
+                        flatMapState.startX = e.clientX;
+                        flatMapState.startY = e.clientY;
+                        renderFlatMap();
+                        updateMarkersPosition();
+                    }
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+                flatMapState.isPanning = false;
+            });
+
+            container3D.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                targetZoom += e.deltaY * 0.008;
+                targetZoom = Math.max(7.2, Math.min(26, targetZoom));
+            }, { passive: false });
+
+            container2D.addEventListener('mousedown', (e) => {
+                flatMapState.isPanning = true;
+                flatMapState.startX = e.clientX;
+                flatMapState.startY = e.clientY;
+            });
+
+            container2D.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomStep = e.deltaY < 0 ? 1.15 : 0.87;
+                flatMapState.zoom = Math.max(0.8, Math.min(5.0, flatMapState.zoom * zoomStep));
+                renderFlatMap();
+                updateMarkersPosition();
+            }, { passive: false });
+
+            let initialPinchDist = null;
+            container3D.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    isDragging = true;
+                    autoRotate = false;
+                    updateAutoRotateUI();
+                    previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                } else if (e.touches.length === 2) {
+                    initialPinchDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                }
+            });
+
+            container3D.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1 && isDragging) {
+                    const deltaX = e.touches[0].clientX - previousMousePosition.x;
+                    const deltaY = e.touches[0].clientY - previousMousePosition.y;
+                    targetRotation.y += deltaX * 0.006;
+                    targetRotation.x += deltaY * 0.006;
+                    targetRotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, targetRotation.x));
+                    previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                } else if (e.touches.length === 2 && initialPinchDist) {
+                    const currentDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    const diff = initialPinchDist - currentDist;
+                    targetZoom = Math.max(7.2, Math.min(26, targetZoom + diff * 0.03));
+                    initialPinchDist = currentDist;
+                }
+            });
+
+            container3D.addEventListener('touchend', () => {
+                isDragging = false;
+                initialPinchDist = null;
+            });
+
+            container2D.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    flatMapState.isPanning = true;
+                    flatMapState.startX = e.touches[0].clientX;
+                    flatMapState.startY = e.touches[0].clientY;
+                }
+            });
+
+            container2D.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1 && flatMapState.isPanning) {
+                    flatMapState.panX += e.touches[0].clientX - flatMapState.startX;
+                    flatMapState.panY += e.touches[0].clientY - flatMapState.startY;
+                    flatMapState.startX = e.touches[0].clientX;
+                    flatMapState.startY = e.touches[0].clientY;
+                    renderFlatMap();
+                    updateMarkersPosition();
+                }
+            });
+
+            container2D.addEventListener('touchend', () => {
+                flatMapState.isPanning = false;
+            });
+
+            // Sự kiện UI
+            document.getElementById('location-selector').addEventListener('change', (e) => {
+                if (e.target.value) focusOnLocation(e.target.value);
+            });
+
+            document.getElementById('btn-reset-view').addEventListener('click', () => {
+                closeDetailPanel();
+                if (viewMode === '3d') {
+                    targetZoom = 15;
+                    targetRotation.x = 0.25;
+                    autoRotate = true;
+                    updateAutoRotateUI();
+                } else {
+                    flatMapState.zoom = 1.0;
+                    flatMapState.panX = 0;
+                    flatMapState.panY = 0;
+                    renderFlatMap();
+                    updateMarkersPosition();
+                }
+            });
+
+            document.getElementById('close-panel').addEventListener('click', closeDetailPanel);
+            document.getElementById('mode-3d').addEventListener('click', () => setViewMode('3d'));
+            document.getElementById('mode-2d').addEventListener('click', () => setViewMode('2d'));
+            document.getElementById('lang-vi').addEventListener('click', () => applyLanguage('vi'));
+            document.getElementById('lang-en').addEventListener('click', () => applyLanguage('en'));
+
+            document.querySelectorAll('.layer-btn').forEach(btn => {
+                btn.addEventListener('click', () => setMapLayer(btn.dataset.layer));
+            });
+
+            // Sự kiện Phóng to ảnh thật NASA
+            document.getElementById('btn-expand-photo').addEventListener('click', openPhotoLightbox);
+            document.getElementById('panel-photo-wrapper').addEventListener('click', openPhotoLightbox);
+            document.getElementById('close-lightbox').addEventListener('click', () => {
+                const modal = document.getElementById('photo-lightbox-modal');
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            });
+
+            // Sự kiện Mở / Đóng Modal Nguồn Dữ Liệu & Ảnh
+            const openCredits = () => {
+                renderCreditsModalContent();
+                const modal = document.getElementById('credits-modal');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            };
+            const closeCredits = () => {
+                const modal = document.getElementById('credits-modal');
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            };
+
+            document.getElementById('btn-open-credits').addEventListener('click', openCredits);
+            document.getElementById('btn-panel-credits-link').addEventListener('click', openCredits);
+            document.getElementById('close-credits-modal').addEventListener('click', closeCredits);
+            document.getElementById('btn-close-credits-bottom').addEventListener('click', closeCredits);
+
+            // Bật / Tắt lưới tọa độ
+            const btnGrid = document.getElementById('toggle-grid');
+            const gridDot = document.getElementById('grid-indicator');
+            btnGrid.addEventListener('click', () => {
+                gridMesh.visible = !gridMesh.visible;
+                if (gridMesh.visible) {
+                    btnGrid.className = 'px-2.5 py-1 rounded-lg text-[11px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-400 transition flex items-center gap-1.5';
+                    gridDot.className = 'w-2 h-2 rounded-full bg-cyan-400';
+                } else {
+                    btnGrid.className = 'px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700 hover:border-cyan-400/50 transition flex items-center gap-1.5';
+                    gridDot.className = 'w-2 h-2 rounded-full bg-slate-500';
+                }
+                if (viewMode === '2d') renderFlatMap();
+            });
+
+            document.getElementById('toggle-rotate').addEventListener('click', () => {
+                autoRotate = !autoRotate;
+                updateAutoRotateUI();
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                if (viewMode === '2d') {
+                    renderFlatMap();
+                    updateMarkersPosition();
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (viewMode === '3d') {
+                if (autoRotate && !isDragging) {
+                    targetRotation.y += 0.0018;
+                }
+
+                currentRotation.x += (targetRotation.x - currentRotation.x) * 0.08;
+                currentRotation.y += (targetRotation.y - currentRotation.y) * 0.08;
+                currentZoom += (targetZoom - currentZoom) * 0.08;
+
+                marsMesh.rotation.x = currentRotation.x;
+                marsMesh.rotation.y = currentRotation.y;
+                camera.position.z = currentZoom;
+                starField.rotation.y += 0.00015;
+
+                updateMarkersPosition();
+                renderer.render(scene, camera);
+            }
+        }
+
+        window.onload = function() {
+            const loadingBar = document.getElementById('loading-bar');
+            const loadingScreen = document.getElementById('loading-screen');
+
+            if (loadingBar) loadingBar.style.width = '40%';
+
+            loadAllNasaMapLayers(() => {
+                if (loadingBar) loadingBar.style.width = '85%';
+            });
+
+            setTimeout(() => {
+                initThreeJS();
+                if (loadingBar) loadingBar.style.width = '100%';
+
+                setTimeout(() => {
+                    if (loadingScreen) {
+                        loadingScreen.style.opacity = '0';
+                        setTimeout(() => {
+                            loadingScreen.style.display = 'none';
+                        }, 700);
+                    }
+                    animate();
+                }, 400);
+            }, 200);
+        };
+    </script>
+</body>
+</html>
